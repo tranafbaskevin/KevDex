@@ -110,26 +110,56 @@ class ReaderPage extends StatelessWidget {
     final imageUrl = convertDriveLinkToImageUrl(link);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Đọc truyện"),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Center(
-          child: imageUrl == null
-              ? Text(
-            "Link không hợp lệ\n\n$link",
-            textAlign: TextAlign.center,
-          )
-              : InteractiveViewer(
-            minScale: 1,
-            maxScale: 5,
-            child: Image.network(
-              imageUrl,
-              fit: BoxFit.contain,
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(0),
+            child: Center(
+              child: imageUrl == null
+                  ? Text(
+                "Link không hợp lệ\n\n$link",
+                textAlign: TextAlign.center,
+              )
+                  : InteractiveViewer(
+                minScale: 1,
+                maxScale: 5,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.fitWidth,
+                  loadingBuilder: (
+                      BuildContext context,
+                      Widget child,
+                      ImageChunkEvent? loadingProgress,
+                      ) {
+                    if (loadingProgress == null) {
+                      return child;
+                    }
+
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  },
+                ),
+              ),
             ),
           ),
-        ),
+          Positioned(
+            top: 40,
+            left: 10,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
