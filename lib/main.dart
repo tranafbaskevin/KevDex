@@ -117,9 +117,22 @@ class ReaderPage extends StatelessWidget {
             padding: const EdgeInsets.all(0),
             child: Center(
               child: isFolder
-                  ? Text(
-                "Folder link detected\n\nGallery mode coming soon\n\n$link",
-                textAlign: TextAlign.center,
+                  ? GridView.count(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                padding: const EdgeInsets.all(16),
+                children: List.generate(6, (index) {
+                  return Card(
+                    color: Colors.grey[900],
+                    child: Center(
+                      child: Text(
+                        "Page ${index + 1}",
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  );
+                }),
               )
                   : InteractiveViewer(
                 minScale: 1,
