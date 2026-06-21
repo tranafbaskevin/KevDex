@@ -1,4 +1,7 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
+
 
 void main() {
   runApp(const DriveReaderApp());
@@ -118,6 +121,7 @@ class ReaderPage extends StatelessWidget {
       "https://flutter.github.io/assets-for-api-docs/assets/widgets/owl-2.jpg",
       "https://flutter.github.io/assets-for-api-docs/assets/widgets/puffin.jpg",
     ];
+    final folderImages = demoImages;
 
     return Scaffold(
       body: Stack(
@@ -131,14 +135,14 @@ class ReaderPage extends StatelessWidget {
                 mainAxisSpacing: 12,
                 crossAxisSpacing: 12,
                 padding: const EdgeInsets.all(16),
-                children: List.generate(6, (index) {
+                children: List.generate(folderImages.length, (index) {
                   return InkWell(
                       onTap: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (context) => ReaderPage(
-                              link: demoImages[index],
+                              link: folderImages[index],
                             ),
                           ),
                         );
@@ -244,6 +248,33 @@ class ReaderPage extends StatelessWidget {
 }
 bool isDriveFolderLink(String link) {
   return link.contains('/drive/folders/');
+}
+
+String? extractDriveFolderId(String link) {
+  final regExp = RegExp(r'/folders/([^/?]+)');
+  final match = regExp.firstMatch(link);
+
+  if (match == null) {
+    return null;
+  }
+
+  return match.group(1);
+}
+
+Future<List<String>> fetchDriveFolderImages(String folderId) async {
+  final response = await http.get(
+    Uri.parse(
+      'https://www.googleapis.com/drive/v3/files?q=%27$folderId%27+in+parents&fields=files(id,name,mimeType)',
+    ),
+  );
+
+  print(response.body);
+
+  if (response.statusCode != 200) {
+    return [];
+  }
+
+  return [];
 }
 
 String? convertDriveLinkToImageUrl(String link) {
