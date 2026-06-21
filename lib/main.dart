@@ -121,9 +121,13 @@ class ReaderPage extends StatelessWidget {
             "Link không hợp lệ\n\n$link",
             textAlign: TextAlign.center,
           )
-              : Image.network(
-            imageUrl,
-            fit: BoxFit.contain,
+              : InteractiveViewer(
+            minScale: 1,
+            maxScale: 5,
+            child: Image.network(
+              imageUrl,
+              fit: BoxFit.contain,
+            ),
           ),
         ),
       ),
