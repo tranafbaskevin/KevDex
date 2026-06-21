@@ -126,6 +126,25 @@ class ReaderPage extends StatelessWidget {
                 child: Image.network(
                   imageUrl,
                   fit: BoxFit.fitWidth,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.broken_image,
+                            color: Colors.white,
+                            size: 64,
+                          ),
+                          SizedBox(height: 12),
+                          Text(
+                            "Failed to load image",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                   loadingBuilder: (
                       BuildContext context,
                       Widget child,
