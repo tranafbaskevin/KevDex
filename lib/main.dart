@@ -96,11 +96,12 @@ class _HomePageState extends State<HomePage> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => ReaderPage(
-                        link: link,
-                        images: images,
-                        initialIndex: 0,
-                      ),
+                      builder: (context) =>
+                          ReaderPage(
+                            link: link,
+                            images: images,
+                            initialIndex: 0,
+                          ),
                     ),
                   );
                 },
@@ -177,112 +178,103 @@ class _ReaderPageState extends State<ReaderPage> {
             child: Center(
               child: isFolder
                   ? GridView.count(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      padding: const EdgeInsets.all(16),
-                      children: List.generate(folderImages.length, (index) {
-                        return InkWell(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ReaderPage(
-                                  link: folderImages[index].fullUrl,
-                                  images: folderImages,
-                                  initialIndex: index,
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                padding: const EdgeInsets.all(16),
+                children: List.generate(folderImages.length, (index) {
+                  return InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              ReaderPage(
+                                link: folderImages[index].fullUrl,
+                                images: folderImages,
+                                initialIndex: index,
+                              ),
+                        ),
+                      );
+                    },
+                    child: Card(
+                      color: Colors.grey[900],
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: Colors.grey[800],
+                                borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(12),
                                 ),
                               ),
-                            );
-                          },
-                          child: Card(
-                            color: Colors.grey[900],
-                            child: Column(
-                              children: [
-                                Expanded(
-                                  child: Container(
-                                    width: double.infinity,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[800],
-                                      borderRadius: const BorderRadius.vertical(
-                                        top: Radius.circular(12),
-                                      ),
-                                    ),
-                                    child: Image.network(
-                                      folderImages[index].thumbnailUrl,
-                                      fit: BoxFit.cover,
-                                      width: double.infinity,
-                                      height: double.infinity,
-                                    ),
-                                  ),
-                                ),
+                              child: Image.network(
+                                folderImages[index].thumbnailUrl,
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: double.infinity,
+                              ),
+                            ),
+                          ),
 
-                                Padding(
-                                  padding: const EdgeInsets.all(8),
-                                  child: Text(
-                                    "Page ${index + 1}",
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Text(
+                              "Page ${index + 1}",
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              )
+                  : PageView.builder(
+                controller: pageController,
+                itemCount: folderImages.length,
+                itemBuilder: (context, pageIndex) {
+                  preloadAround(pageIndex);
+
+                  final currentImage = folderImages[pageIndex];
+                  return GestureDetector(
+                    onTap: showReaderControls,
+                    child: InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 5,
+                      child: CachedNetworkImage(
+                        imageUrl: currentImage.fullUrl,
+                        fit: BoxFit.fitWidth,
+                        placeholder: (context, url) =>
+                        const Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                        errorWidget: (context, url, error) {
+                          return const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.broken_image,
+                                  color: Colors.white,
+                                  size: 64,
+                                ),
+                                SizedBox(height: 12),
+                                Text(
+                                  "Failed to load image",
+                                  style: TextStyle(color: Colors.white),
                                 ),
                               ],
                             ),
-                          ),
-                        );
-                      }),
-                    )
-                  : PageView.builder(
-                      controller: pageController,
-                      itemCount: folderImages.length,
-                      itemBuilder: (context, pageIndex) {
-                        preloadAround(pageIndex);
-
-                        final currentImage = folderImages[pageIndex];
-                        return GestureDetector(
-                          onTap: showReaderControls,
-                          child: InteractiveViewer(
-                            minScale: 1,
-                            maxScale: 5,
-                            child: Image.network(
-                              currentImage.fullUrl,
-                              fit: BoxFit.fitWidth,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.broken_image,
-                                        color: Colors.white,
-                                        size: 64,
-                                      ),
-                                      SizedBox(height: 12),
-                                      Text(
-                                        "Failed to load image",
-                                        style: TextStyle(color: Colors.white),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                              loadingBuilder:
-                                  (
-                                    BuildContext context,
-                                    Widget child,
-                                    ImageChunkEvent? loadingProgress,
-                                  ) {
-                                    if (loadingProgress == null) {
-                                      return child;
-                                    }
-
-                                    return const Center(
-                                      child: CircularProgressIndicator(),
-                                    );
-                                  },
-                            ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
+                  );
+                },
+              ),
             ),
           ),
           if (!isFolder && showControls)
@@ -296,19 +288,19 @@ class _ReaderPageState extends State<ReaderPage> {
                     color: Colors.black38,
                     shape: BoxShape.circle,
                   ),
-                    child: IconButton(
-                      icon: const Icon(
-                        Icons.chevron_left,
-                        color: Colors.white70,
-                        size: 42,
-                      ),
-                      onPressed: () {
-                        pageController.previousPage(
-                          duration: const Duration(milliseconds: 250),
-                          curve: Curves.easeOut,
-                        );
-                      },
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.chevron_left,
+                      color: Colors.white70,
+                      size: 42,
                     ),
+                    onPressed: () {
+                      pageController.previousPage(
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOut,
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
@@ -395,17 +387,17 @@ Future<List<DriveImage>> fetchDriveFolderImages(String folderId) async {
   return files
       .where((file) => file['mimeType'].toString().startsWith('image/'))
       .map<DriveImage>((file) {
-        final thumbnail = file['thumbnailLink'] as String?;
-        final id = file['id'];
+    final thumbnail = file['thumbnailLink'] as String?;
+    final id = file['id'];
 
-        final fullUrl = 'https://drive.google.com/uc?export=view&id=$id';
+    final fullUrl = 'https://drive.google.com/uc?export=view&id=$id';
 
-        final thumbnailUrl = thumbnail != null && thumbnail.isNotEmpty
-            ? thumbnail.replaceAll(RegExp(r'=s\d+'), '=s400')
-            : fullUrl;
+    final thumbnailUrl = thumbnail != null && thumbnail.isNotEmpty
+        ? thumbnail.replaceAll(RegExp(r'=s\d+'), '=s400')
+        : fullUrl;
 
-        return DriveImage(thumbnailUrl: thumbnailUrl, fullUrl: fullUrl);
-      })
+    return DriveImage(thumbnailUrl: thumbnailUrl, fullUrl: fullUrl);
+  })
       .toList();
 }
 
