@@ -285,7 +285,7 @@ String? extractDriveFolderId(String link) {
 Future<List<DriveImage>> fetchDriveFolderImages(String folderId) async {
   final response = await http.get(
     Uri.parse(
-      'https://www.googleapis.com/drive/v3/files?q=%27$folderId%27+in+parents&fields=files(id,name,mimeType,thumbnailLink)&key=AIzaSyAHIpqx856jNpz9nrD7BBwakLkTY89cHnc',
+      'https://www.googleapis.com/drive/v3/files?q=%27$folderId%27+in+parents&fields=files(id,name,mimeType,thumbnailLink)&orderBy=name&key=AIzaSyAHIpqx856jNpz9nrD7BBwakLkTY89cHnc',
     ),
   );
 
