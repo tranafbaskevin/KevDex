@@ -111,7 +111,8 @@ class _HomePageState extends State<HomePage> {
                       builder: (context) => ReaderPage(
                         link: link,
                         images: images,
-                      ),
+                        initialIndex: 0,
+                      )
                     ),
                   );
                 },
@@ -124,23 +125,34 @@ class _HomePageState extends State<HomePage> {
     );
   }
 }
-class ReaderPage extends StatelessWidget {
+class ReaderPage extends StatefulWidget {
   final String link;
   final List<DriveImage> images;
+  final int initialIndex;
 
   const ReaderPage({
     super.key,
     required this.link,
     required this.images,
+    required this.initialIndex,
   });
 
   @override
+  State<ReaderPage> createState() => _ReaderPageState();
+}
+
+class _ReaderPageState extends State<ReaderPage> {
+
+  @override
   Widget build(BuildContext context) {
-    final imageUrl = convertDriveLinkToImageUrl(link);
-    final isFolder = isDriveFolderLink(link);
+    final imageUrl = convertDriveLinkToImageUrl(widget.link);
+    final isFolder = isDriveFolderLink(widget.link);
 
 
-    final folderImages = images;
+    final folderImages = widget.images;
+    final pageController = PageController(
+      initialPage: widget.initialIndex,
+    );
 
     return Scaffold(
       body: Stack(
@@ -163,7 +175,8 @@ class ReaderPage extends StatelessWidget {
                             builder: (context) => ReaderPage(
                               link: folderImages[index].fullUrl,
                               images: folderImages,
-                            ),
+                              initialIndex: index,
+                            )
                           ),
                         );
                       },
@@ -204,46 +217,52 @@ class ReaderPage extends StatelessWidget {
                 );
                 }),
                 )
-                  : InteractiveViewer(
-                minScale: 1,
-                maxScale: 5,
-                child: Image.network(
-                  imageUrl!,
-                  fit: BoxFit.fitWidth,
-                  errorBuilder: (context, error, stackTrace) {
-                    return const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.broken_image,
-                            color: Colors.white,
-                            size: 64,
-                          ),
-                          SizedBox(height: 12),
-                          Text(
-                            "Failed to load image",
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                  loadingBuilder: (
-                      BuildContext context,
-                      Widget child,
-                      ImageChunkEvent? loadingProgress,
-                      ) {
-                    if (loadingProgress == null) {
-                      return child;
-                    }
+                  : PageView.builder(
+                    controller: pageController,
+                    itemCount: folderImages.length,
+                    itemBuilder: (context, pageIndex) {
+                      final currentImage = folderImages[pageIndex];
+                      return InteractiveViewer(
 
-                    return const Center(
-                      child: CircularProgressIndicator(),
-                    );
-                  },
-                ),
-              ),
+                        minScale: 1,
+                        maxScale: 5,
+                        child: Image.network(
+                          currentImage.fullUrl,
+                          fit: BoxFit.fitWidth,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.broken_image,
+                                    color: Colors.white,
+                                    size: 64,
+                                  ),
+                                  SizedBox(height: 12),
+                                  Text(
+                                    "Failed to load image",
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          loadingBuilder: (BuildContext context,
+                              Widget child,
+                              ImageChunkEvent? loadingProgress,) {
+                            if (loadingProgress == null) {
+                              return child;
+                            }
+
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
             ),
           ),
           Positioned(
