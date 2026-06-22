@@ -81,13 +81,27 @@ class _HomePageState extends State<HomePage> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   final link = linkController.text.trim();
+                  print('OPEN BUTTON CLICKED: $link');
+
+                  final folderId = extractDriveFolderId(link);
+                  print('FOLDER ID: $folderId');
+
+                  List<String> images = [];
+
+                  if (folderId != null) {
+                    images = await fetchDriveFolderImages(folderId);
+                    print('IMAGES FOUND: ${images.length}');
+                  }
 
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => ReaderPage(link: link),
+                      builder: (context) => ReaderPage(
+                        link: link,
+                        images: images,
+                      ),
                     ),
                   );
                 },
@@ -102,10 +116,12 @@ class _HomePageState extends State<HomePage> {
 }
 class ReaderPage extends StatelessWidget {
   final String link;
+  final List<String> images;
 
   const ReaderPage({
     super.key,
     required this.link,
+    required this.images,
   });
 
   @override
@@ -121,7 +137,8 @@ class ReaderPage extends StatelessWidget {
       "https://flutter.github.io/assets-for-api-docs/assets/widgets/owl-2.jpg",
       "https://flutter.github.io/assets-for-api-docs/assets/widgets/puffin.jpg",
     ];
-    final folderImages = demoImages;
+    final folderImages =
+    images.isNotEmpty ? images : demoImages;
 
     return Scaffold(
       body: Stack(
@@ -143,6 +160,7 @@ class ReaderPage extends StatelessWidget {
                           MaterialPageRoute(
                             builder: (context) => ReaderPage(
                               link: folderImages[index],
+                              images: folderImages,
                             ),
                           ),
                         );
@@ -264,20 +282,33 @@ String? extractDriveFolderId(String link) {
 Future<List<String>> fetchDriveFolderImages(String folderId) async {
   final response = await http.get(
     Uri.parse(
-      'https://www.googleapis.com/drive/v3/files?q=%27$folderId%27+in+parents&fields=files(id,name,mimeType)',
+      'https://www.googleapis.com/drive/v3/files?q=%27$folderId%27+in+parents&fields=files(id,name,mimeType)&key=AIzaSyAHIpqx856jNpz9nrD7BBwakLkTY89cHnc',
     ),
   );
 
-  print(response.body);
+  print('DRIVE API RESPONSE: ${response.body}');
 
   if (response.statusCode != 200) {
     return [];
   }
 
-  return [];
+  final data = jsonDecode(response.body);
+  final files = data['files'] as List;
+
+  return files
+      .where((file) => file['mimeType'].toString().startsWith('image/'))
+      .map<String>((file) {
+    final id = file['id'];
+    return 'https://drive.google.com/uc?export=view&id=$id';
+  })
+      .toList();
 }
 
 String? convertDriveLinkToImageUrl(String link) {
+  if (link.startsWith('http') && link.contains('uc?export=view&id=')) {
+    return link;
+  }
+
   if (link.startsWith('http') && !link.contains('drive.google.com')) {
     return link;
   }
