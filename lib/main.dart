@@ -176,16 +176,90 @@ const List<UiBackground> _presetUiBackgrounds = [
   UiBackground.asset(title: 'Shadow Reader', path: _shadowBackgroundAsset),
 ];
 
+enum ReaderFitMode {
+  fitWidth(
+    label: 'Width',
+    icon: Icons.fit_screen_rounded,
+    fit: BoxFit.fitWidth,
+  ),
+  fullPage(label: 'Page', icon: Icons.crop_free_rounded, fit: BoxFit.contain);
+
+  final String label;
+  final IconData icon;
+  final BoxFit fit;
+
+  const ReaderFitMode({
+    required this.label,
+    required this.icon,
+    required this.fit,
+  });
+}
+
+class ReaderComfortSettings {
+  final ReaderFitMode fitMode;
+  final double shade;
+
+  const ReaderComfortSettings({required this.fitMode, required this.shade});
+
+  ReaderComfortSettings copyWith({ReaderFitMode? fitMode, double? shade}) {
+    return ReaderComfortSettings(
+      fitMode: fitMode ?? this.fitMode,
+      shade: shade ?? this.shade,
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return {'fitMode': fitMode.name, 'shade': shade};
+  }
+
+  static ReaderComfortSettings? fromJson(Object? value) {
+    if (value is! Map<String, Object?>) {
+      return null;
+    }
+
+    final fitModeName = value['fitMode'];
+    final shadeValue = value['shade'];
+
+    if (fitModeName is! String || shadeValue is! num) {
+      return null;
+    }
+
+    ReaderFitMode? fitMode;
+    for (final mode in ReaderFitMode.values) {
+      if (mode.name == fitModeName) {
+        fitMode = mode;
+        break;
+      }
+    }
+
+    if (fitMode == null) {
+      return null;
+    }
+
+    return ReaderComfortSettings(
+      fitMode: fitMode,
+      shade: shadeValue.toDouble().clamp(0.0, 0.55),
+    );
+  }
+}
+
+const ReaderComfortSettings defaultReaderComfortSettings =
+    ReaderComfortSettings(fitMode: ReaderFitMode.fitWidth, shade: 0);
+
 final ValueNotifier<ReadingProgress?> readingProgressNotifier =
     ValueNotifier<ReadingProgress?>(null);
 
 final ValueNotifier<UiBackground> uiBackgroundNotifier =
     ValueNotifier<UiBackground>(defaultUiBackground);
 
+final ValueNotifier<ReaderComfortSettings> readerComfortNotifier =
+    ValueNotifier<ReaderComfortSettings>(defaultReaderComfortSettings);
+
 class KevDexMemory {
   static const String _lastLinkKey = 'kevdex.lastLink';
   static const String _readerProgressKey = 'kevdex.readerProgress';
   static const String _uiBackgroundKey = 'kevdex.uiBackground';
+  static const String _readerComfortKey = 'kevdex.readerComfort';
   static const String _customBackgroundFileName = 'kevdex_custom_background';
 
   static SharedPreferences? _preferences;
@@ -198,6 +272,7 @@ class KevDexMemory {
     lastLink = preferences.getString(_lastLinkKey);
     _restoreReadingProgress(preferences);
     _restoreUiBackground(preferences);
+    _restoreReaderComfort(preferences);
   }
 
   static Future<void> saveLastLink(String link) async {
@@ -222,6 +297,11 @@ class KevDexMemory {
   static Future<void> saveUiBackground(UiBackground background) async {
     final preferences = await _loadPreferences();
     await preferences.setString(_uiBackgroundKey, jsonEncode(background));
+  }
+
+  static Future<void> saveReaderComfort(ReaderComfortSettings settings) async {
+    final preferences = await _loadPreferences();
+    await preferences.setString(_readerComfortKey, jsonEncode(settings));
   }
 
   static Future<UiBackground> saveCustomUiBackground(XFile image) async {
@@ -290,6 +370,24 @@ class KevDexMemory {
       uiBackgroundNotifier.value = background;
     } on FormatException {
       preferences.remove(_uiBackgroundKey);
+    }
+  }
+
+  static void _restoreReaderComfort(SharedPreferences preferences) {
+    final rawSettings = preferences.getString(_readerComfortKey);
+
+    if (rawSettings == null) {
+      return;
+    }
+
+    try {
+      final settings = ReaderComfortSettings.fromJson(jsonDecode(rawSettings));
+
+      if (settings != null) {
+        readerComfortNotifier.value = settings;
+      }
+    } on FormatException {
+      preferences.remove(_readerComfortKey);
     }
   }
 
@@ -1038,9 +1136,17 @@ class _ReaderPageState extends State<ReaderPage> {
     super.initState();
     currentPageIndex = widget.initialIndex;
     pageController = PageController(initialPage: widget.initialIndex);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scheduleControlsHide();
-    });
+
+    final hasReadablePage =
+        widget.images.isNotEmpty ||
+        (!isDriveFolderLink(widget.link) &&
+            convertDriveLinkToImageUrl(widget.link) != null);
+
+    if (hasReadablePage) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scheduleControlsHide();
+      });
+    }
   }
 
   @override
@@ -1119,6 +1225,39 @@ class _ReaderPageState extends State<ReaderPage> {
     pageController.nextPage(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
+    );
+  }
+
+  void _showReaderComfortSheet() {
+    _hideControlsToken++;
+    setState(() {
+      showControls = true;
+    });
+
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const _ReaderComfortSheet(),
+    ).whenComplete(() {
+      if (mounted) {
+        _scheduleControlsHide();
+      }
+    });
+  }
+
+  void _openReaderGallery(List<DriveImage> readerImages) {
+    if (readerImages.isEmpty) {
+      return;
+    }
+
+    _showControlsTemporarily();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReaderGalleryPage(folderImages: readerImages),
+      ),
     );
   }
 
@@ -1210,16 +1349,21 @@ class _ReaderPageState extends State<ReaderPage> {
                         child: InteractiveViewer(
                           minScale: 1,
                           maxScale: 5,
-                          child: CachedNetworkImage(
-                            imageUrl: currentImage.fullUrl,
-                            fit: BoxFit.fitWidth,
-                            placeholder: (context, url) =>
-                                const _MangaLoadingState(),
-                            errorWidget: (context, url, error) {
-                              return const _ReaderMessageState(
-                                icon: Icons.broken_image_rounded,
-                                title: 'This page could not be opened.',
-                                message: 'Check the link or try again.',
+                          child: ValueListenableBuilder<ReaderComfortSettings>(
+                            valueListenable: readerComfortNotifier,
+                            builder: (context, settings, child) {
+                              return CachedNetworkImage(
+                                imageUrl: currentImage.fullUrl,
+                                fit: settings.fitMode.fit,
+                                placeholder: (context, url) =>
+                                    const _MangaLoadingState(),
+                                errorWidget: (context, url, error) {
+                                  return const _ReaderMessageState(
+                                    icon: Icons.broken_image_rounded,
+                                    title: 'This page could not be opened.',
+                                    message: 'Check the link or try again.',
+                                  );
+                                },
                               );
                             },
                           ),
@@ -1228,6 +1372,23 @@ class _ReaderPageState extends State<ReaderPage> {
                     },
                   ),
           ),
+          if (!isFolder && readerImages.isNotEmpty)
+            ValueListenableBuilder<ReaderComfortSettings>(
+              valueListenable: readerComfortNotifier,
+              builder: (context, settings, child) {
+                if (settings.shade <= 0) {
+                  return const SizedBox.shrink();
+                }
+
+                return IgnorePointer(
+                  child: ColoredBox(
+                    color: Colors.black.withAlpha(
+                      (settings.shade.clamp(0.0, 0.55) * 255).round(),
+                    ),
+                  ),
+                );
+              },
+            ),
           if (!isFolder && showControls && readerImages.length > 1)
             Positioned(
               left: 12,
@@ -1283,6 +1444,10 @@ class _ReaderPageState extends State<ReaderPage> {
                 currentPage: currentPageIndex + 1,
                 totalPages: pageCount,
                 progress: progress,
+                onComfort: _showReaderComfortSheet,
+                onGallery: readerImages.length > 1
+                    ? () => _openReaderGallery(readerImages)
+                    : null,
                 onBack: () {
                   Navigator.pop(context);
                 },
@@ -1316,12 +1481,16 @@ class _ReaderProgressHud extends StatelessWidget {
   final int totalPages;
   final double progress;
   final VoidCallback onBack;
+  final VoidCallback onComfort;
+  final VoidCallback? onGallery;
 
   const _ReaderProgressHud({
     required this.currentPage,
     required this.totalPages,
     required this.progress,
     required this.onBack,
+    required this.onComfort,
+    this.onGallery,
   });
 
   @override
@@ -1371,6 +1540,215 @@ class _ReaderProgressHud extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+          if (onGallery != null) ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 42,
+              height: 42,
+              child: IconButton(
+                tooltip: 'Gallery',
+                icon: const Icon(
+                  Icons.grid_view_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                onPressed: onGallery,
+              ),
+            ),
+          ],
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 42,
+            height: 42,
+            child: IconButton(
+              tooltip: 'Reader comfort',
+              icon: const Icon(
+                Icons.tune_rounded,
+                color: _primaryAccent,
+                size: 21,
+              ),
+              onPressed: onComfort,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReaderComfortSheet extends StatelessWidget {
+  const _ReaderComfortSheet();
+
+  void _updateSettings(ReaderComfortSettings settings) {
+    readerComfortNotifier.value = settings;
+    unawaited(KevDexMemory.saveReaderComfort(settings));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 520),
+        margin: const EdgeInsets.all(12),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomPadding),
+        decoration: BoxDecoration(
+          color: const Color(0xF01A1A22),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF2F2D39)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x88000000),
+              blurRadius: 28,
+              offset: Offset(0, 16),
+            ),
+          ],
+        ),
+        child: ValueListenableBuilder<ReaderComfortSettings>(
+          valueListenable: readerComfortNotifier,
+          builder: (context, settings, child) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.tune_rounded, color: _primaryAccent),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Reader Comfort',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                SegmentedButton<ReaderFitMode>(
+                  segments: [
+                    for (final mode in ReaderFitMode.values)
+                      ButtonSegment<ReaderFitMode>(
+                        value: mode,
+                        icon: Icon(mode.icon, size: 18),
+                        label: Text(mode.label),
+                      ),
+                  ],
+                  selected: {settings.fitMode},
+                  onSelectionChanged: (selection) {
+                    _updateSettings(
+                      settings.copyWith(fitMode: selection.first),
+                    );
+                  },
+                  style: SegmentedButton.styleFrom(
+                    backgroundColor: _fieldColor,
+                    foregroundColor: _mutedText,
+                    selectedBackgroundColor: _primaryAccent,
+                    selectedForegroundColor: const Color(0xFF101016),
+                    side: const BorderSide(color: Color(0xFF393745)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.dark_mode_rounded,
+                      color: _mutedText,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Shade',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${(settings.shade * 100).round()}%',
+                      style: const TextStyle(
+                        color: _mutedText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                Slider(
+                  value: settings.shade.clamp(0.0, 0.55).toDouble(),
+                  min: 0,
+                  max: 0.55,
+                  divisions: 11,
+                  activeColor: _primaryAccent,
+                  inactiveColor: const Color(0xFF393745),
+                  onChanged: (value) {
+                    _updateSettings(settings.copyWith(shade: value));
+                  },
+                ),
+                const SizedBox(height: 4),
+                TextButton.icon(
+                  onPressed: () {
+                    _updateSettings(defaultReaderComfortSettings);
+                  },
+                  icon: const Icon(Icons.restart_alt_rounded),
+                  label: const Text('Reset Reader Comfort'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: _mutedText,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class ReaderGalleryPage extends StatelessWidget {
+  final List<DriveImage> folderImages;
+
+  const ReaderGalleryPage({super.key, required this.folderImages});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          _GalleryGrid(folderImages: folderImages),
+          Positioned(
+            top: 40,
+            left: 10,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: IconButton(
+                tooltip: 'Back',
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+              ),
             ),
           ),
         ],

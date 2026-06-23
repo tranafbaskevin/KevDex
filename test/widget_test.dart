@@ -7,6 +7,7 @@ void main() {
   testWidgets('Home screen shows KevDex identity', (WidgetTester tester) async {
     readingProgressNotifier.value = null;
     uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
 
     await tester.pumpWidget(const DriveReaderApp());
 
@@ -25,6 +26,7 @@ void main() {
       pageIndex: 0,
     );
     uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
 
     await tester.pumpWidget(const DriveReaderApp());
 
@@ -33,6 +35,7 @@ void main() {
 
     readingProgressNotifier.value = null;
     uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
   });
 
   testWidgets('Reader empty state uses manga-friendly copy', (
@@ -40,6 +43,7 @@ void main() {
   ) async {
     readingProgressNotifier.value = null;
     uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
 
     await tester.pumpWidget(
       const MaterialApp(
