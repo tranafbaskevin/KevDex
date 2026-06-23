@@ -123,6 +123,105 @@ class ReadingProgress {
   }
 }
 
+class LibraryItem {
+  final String sourceLink;
+  final List<DriveImage> images;
+  final int pageIndex;
+  final int updatedAtMs;
+
+  const LibraryItem({
+    required this.sourceLink,
+    required this.images,
+    required this.pageIndex,
+    required this.updatedAtMs,
+  });
+
+  factory LibraryItem.fromProgress(ReadingProgress progress) {
+    return LibraryItem(
+      sourceLink: progress.sourceLink,
+      images: List<DriveImage>.unmodifiable(progress.images),
+      pageIndex: progress.images.isEmpty
+          ? 0
+          : progress.pageIndex.clamp(0, progress.images.length - 1).toInt(),
+      updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  int get totalPages => images.isEmpty ? 1 : images.length;
+
+  int get currentPage => pageIndex + 1;
+
+  String get title {
+    if (isDriveFolderLink(sourceLink) || images.length > 1) {
+      return 'Drive Folder';
+    }
+
+    return 'Single Page';
+  }
+
+  String get subtitle => 'Page $currentPage / $totalPages';
+
+  String? get thumbnailUrl {
+    if (images.isEmpty) {
+      return convertDriveLinkToImageUrl(sourceLink);
+    }
+
+    final safeIndex = pageIndex.clamp(0, images.length - 1).toInt();
+    return images[safeIndex].thumbnailUrl;
+  }
+
+  ReadingProgress toProgress() {
+    return ReadingProgress(
+      sourceLink: sourceLink,
+      images: List<DriveImage>.unmodifiable(images),
+      pageIndex: images.isEmpty
+          ? 0
+          : pageIndex.clamp(0, images.length - 1).toInt(),
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return {
+      'sourceLink': sourceLink,
+      'pageIndex': pageIndex,
+      'updatedAtMs': updatedAtMs,
+      'images': images.map((image) => image.toJson()).toList(),
+    };
+  }
+
+  static LibraryItem? fromJson(Object? value) {
+    if (value is! Map<String, Object?>) {
+      return null;
+    }
+
+    final sourceLink = value['sourceLink'];
+    final pageIndex = value['pageIndex'];
+    final updatedAtMs = value['updatedAtMs'];
+    final imagesValue = value['images'];
+
+    if (sourceLink is! String ||
+        pageIndex is! int ||
+        updatedAtMs is! int ||
+        imagesValue is! List) {
+      return null;
+    }
+
+    final images = imagesValue
+        .map(DriveImage.fromJson)
+        .whereType<DriveImage>()
+        .toList(growable: false);
+
+    return LibraryItem(
+      sourceLink: sourceLink,
+      images: List<DriveImage>.unmodifiable(images),
+      pageIndex: images.isEmpty
+          ? 0
+          : pageIndex.clamp(0, images.length - 1).toInt(),
+      updatedAtMs: updatedAtMs,
+    );
+  }
+}
+
 class UiBackground {
   final String title;
   final String path;
@@ -249,6 +348,9 @@ const ReaderComfortSettings defaultReaderComfortSettings =
 final ValueNotifier<ReadingProgress?> readingProgressNotifier =
     ValueNotifier<ReadingProgress?>(null);
 
+final ValueNotifier<List<LibraryItem>> libraryNotifier =
+    ValueNotifier<List<LibraryItem>>(const <LibraryItem>[]);
+
 final ValueNotifier<UiBackground> uiBackgroundNotifier =
     ValueNotifier<UiBackground>(defaultUiBackground);
 
@@ -258,6 +360,7 @@ final ValueNotifier<ReaderComfortSettings> readerComfortNotifier =
 class KevDexMemory {
   static const String _lastLinkKey = 'kevdex.lastLink';
   static const String _readerProgressKey = 'kevdex.readerProgress';
+  static const String _libraryKey = 'kevdex.library';
   static const String _uiBackgroundKey = 'kevdex.uiBackground';
   static const String _readerComfortKey = 'kevdex.readerComfort';
   static const String _customBackgroundFileName = 'kevdex_custom_background';
@@ -271,6 +374,7 @@ class KevDexMemory {
     final preferences = await _loadPreferences();
     lastLink = preferences.getString(_lastLinkKey);
     _restoreReadingProgress(preferences);
+    _restoreLibrary(preferences);
     _restoreUiBackground(preferences);
     _restoreReaderComfort(preferences);
   }
@@ -292,6 +396,32 @@ class KevDexMemory {
   static Future<void> saveReadingProgress(ReadingProgress progress) async {
     final preferences = await _loadPreferences();
     await preferences.setString(_readerProgressKey, jsonEncode(progress));
+    await upsertLibraryItem(LibraryItem.fromProgress(progress));
+  }
+
+  static Future<void> upsertLibraryItem(LibraryItem item) async {
+    final preferences = await _loadPreferences();
+    final nextItems = <LibraryItem>[
+      item,
+      ...libraryNotifier.value.where(
+        (currentItem) => currentItem.sourceLink != item.sourceLink,
+      ),
+    ];
+
+    libraryNotifier.value = List<LibraryItem>.unmodifiable(
+      nextItems.take(8).toList(growable: false),
+    );
+    await preferences.setString(_libraryKey, jsonEncode(libraryNotifier.value));
+  }
+
+  static Future<void> removeLibraryItem(String sourceLink) async {
+    final preferences = await _loadPreferences();
+    libraryNotifier.value = List<LibraryItem>.unmodifiable(
+      libraryNotifier.value
+          .where((item) => item.sourceLink != sourceLink)
+          .toList(growable: false),
+    );
+    await preferences.setString(_libraryKey, jsonEncode(libraryNotifier.value));
   }
 
   static Future<void> saveUiBackground(UiBackground background) async {
@@ -346,6 +476,33 @@ class KevDexMemory {
       }
     } on FormatException {
       preferences.remove(_readerProgressKey);
+    }
+  }
+
+  static void _restoreLibrary(SharedPreferences preferences) {
+    final rawLibrary = preferences.getString(_libraryKey);
+
+    if (rawLibrary == null) {
+      return;
+    }
+
+    try {
+      final decodedLibrary = jsonDecode(rawLibrary);
+
+      if (decodedLibrary is! List) {
+        return;
+      }
+
+      final items = decodedLibrary
+          .map(LibraryItem.fromJson)
+          .whereType<LibraryItem>()
+          .toList(growable: false);
+
+      if (items.isNotEmpty) {
+        libraryNotifier.value = List<LibraryItem>.unmodifiable(items);
+      }
+    } on FormatException {
+      preferences.remove(_libraryKey);
     }
   }
 
@@ -516,11 +673,25 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    if (images.isNotEmpty) {
+      final progress = ReadingProgress(
+        sourceLink: link,
+        images: List<DriveImage>.unmodifiable(images),
+        pageIndex: 0,
+      );
+      readingProgressNotifier.value = progress;
+      unawaited(KevDexMemory.saveReadingProgress(progress));
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) =>
-            ReaderPage(link: link, images: images, initialIndex: 0),
+        builder: (context) => ReaderPage(
+          link: link,
+          images: images,
+          initialIndex: 0,
+          startInGallery: folderId != null,
+        ),
       ),
     );
   }
@@ -533,6 +704,24 @@ class _HomePageState extends State<HomePage> {
           link: progress.sourceLink,
           images: progress.images,
           initialIndex: progress.pageIndex,
+          startInGallery: false,
+        ),
+      ),
+    );
+  }
+
+  void _openLibraryItem(LibraryItem item) {
+    final progress = item.toProgress();
+    readingProgressNotifier.value = progress;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReaderPage(
+          link: item.sourceLink,
+          images: item.images,
+          initialIndex: item.pageIndex,
+          startInGallery: false,
         ),
       ),
     );
@@ -582,6 +771,22 @@ class _HomePageState extends State<HomePage> {
                           child: _ContinueReadingCard(
                             progress: progress,
                             onTap: () => _continueReading(progress),
+                          ),
+                        );
+                      },
+                    ),
+                    ValueListenableBuilder<List<LibraryItem>>(
+                      valueListenable: libraryNotifier,
+                      builder: (context, items, child) {
+                        if (items.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          child: _LibraryShelf(
+                            items: items,
+                            onOpen: _openLibraryItem,
                           ),
                         );
                       },
@@ -1107,16 +1312,176 @@ class _ContinueReadingCard extends StatelessWidget {
   }
 }
 
+class _LibraryShelf extends StatelessWidget {
+  final List<LibraryItem> items;
+  final ValueChanged<LibraryItem> onOpen;
+
+  const _LibraryShelf({required this.items, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.local_library_rounded, color: _primaryAccent),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                'Library',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            Text(
+              '${items.length} saved',
+              style: const TextStyle(
+                color: _mutedText,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        for (final item in items.take(3)) ...[
+          _LibraryItemCard(
+            item: item,
+            onOpen: () => onOpen(item),
+            onRemove: () =>
+                unawaited(KevDexMemory.removeLibraryItem(item.sourceLink)),
+          ),
+          if (item != items.take(3).last) const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+class _LibraryItemCard extends StatelessWidget {
+  final LibraryItem item;
+  final VoidCallback onOpen;
+  final VoidCallback onRemove;
+
+  const _LibraryItemCard({
+    required this.item,
+    required this.onOpen,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final thumbnailUrl = item.thumbnailUrl;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(8),
+        child: Ink(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: _glassSurfaceColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF2F2D39)),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  width: 54,
+                  height: 64,
+                  child: thumbnailUrl == null
+                      ? const ColoredBox(
+                          color: _fieldColor,
+                          child: Icon(
+                            Icons.auto_stories_rounded,
+                            color: _primaryAccent,
+                          ),
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: thumbnailUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) =>
+                              const _ThumbnailPlaceholder(),
+                          errorWidget: (context, url, error) =>
+                              const _ThumbnailPlaceholder(),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      item.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _mutedText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      item.sourceLink,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF8E8C99),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Remove from Library',
+                icon: const Icon(Icons.close_rounded, size: 19),
+                color: _mutedText,
+                onPressed: onRemove,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ReaderPage extends StatefulWidget {
   final String link;
   final List<DriveImage> images;
   final int initialIndex;
+  final bool startInGallery;
 
   const ReaderPage({
     super.key,
     required this.link,
     required this.images,
     required this.initialIndex,
+    this.startInGallery = false,
   });
 
   @override
@@ -1138,9 +1503,10 @@ class _ReaderPageState extends State<ReaderPage> {
     pageController = PageController(initialPage: widget.initialIndex);
 
     final hasReadablePage =
-        widget.images.isNotEmpty ||
-        (!isDriveFolderLink(widget.link) &&
-            convertDriveLinkToImageUrl(widget.link) != null);
+        !widget.startInGallery &&
+        (widget.images.isNotEmpty ||
+            (!isDriveFolderLink(widget.link) &&
+                convertDriveLinkToImageUrl(widget.link) != null));
 
     if (hasReadablePage) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1256,7 +1622,10 @@ class _ReaderPageState extends State<ReaderPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ReaderGalleryPage(folderImages: readerImages),
+        builder: (context) => ReaderGalleryPage(
+          folderImages: readerImages,
+          sourceLink: widget.link,
+        ),
       ),
     );
   }
@@ -1287,13 +1656,14 @@ class _ReaderPageState extends State<ReaderPage> {
   @override
   Widget build(BuildContext context) {
     final isFolder = isDriveFolderLink(widget.link);
+    final showGallery = isFolder && widget.startInGallery;
     final singleImageUrl = convertDriveLinkToImageUrl(widget.link);
     final folderImages = widget.images;
     final readerImages = _resolveReaderImages(isFolder, singleImageUrl);
     final pageCount = readerImages.length;
     final progress = pageCount == 0 ? 0.0 : (currentPageIndex + 1) / pageCount;
 
-    if (!isFolder && readerImages.isNotEmpty) {
+    if (!showGallery && readerImages.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _saveReadingProgress(readerImages, currentPageIndex);
@@ -1302,7 +1672,11 @@ class _ReaderPageState extends State<ReaderPage> {
     }
 
     void preloadImage(String url) {
-      precacheImage(NetworkImage(url), context);
+      precacheImage(
+        NetworkImage(url),
+        context,
+        onError: (error, stackTrace) {},
+      );
     }
 
     void preloadAround(int index) {
@@ -1319,8 +1693,11 @@ class _ReaderPageState extends State<ReaderPage> {
       body: Stack(
         children: [
           Center(
-            child: isFolder
-                ? _GalleryGrid(folderImages: folderImages)
+            child: showGallery
+                ? _GalleryGrid(
+                    folderImages: folderImages,
+                    sourceLink: widget.link,
+                  )
                 : readerImages.isEmpty
                 ? const _ReaderMessageState(
                     icon: Icons.broken_image_rounded,
@@ -1372,7 +1749,7 @@ class _ReaderPageState extends State<ReaderPage> {
                     },
                   ),
           ),
-          if (!isFolder && readerImages.isNotEmpty)
+          if (!showGallery && readerImages.isNotEmpty)
             ValueListenableBuilder<ReaderComfortSettings>(
               valueListenable: readerComfortNotifier,
               builder: (context, settings, child) {
@@ -1389,7 +1766,7 @@ class _ReaderPageState extends State<ReaderPage> {
                 );
               },
             ),
-          if (!isFolder && showControls && readerImages.length > 1)
+          if (!showGallery && showControls && readerImages.length > 1)
             Positioned(
               left: 12,
               top: 0,
@@ -1411,7 +1788,7 @@ class _ReaderPageState extends State<ReaderPage> {
                 ),
               ),
             ),
-          if (!isFolder && showControls && readerImages.length > 1)
+          if (!showGallery && showControls && readerImages.length > 1)
             Positioned(
               right: 12,
               top: 0,
@@ -1435,7 +1812,7 @@ class _ReaderPageState extends State<ReaderPage> {
                 ),
               ),
             ),
-          if (!isFolder && showControls && readerImages.isNotEmpty)
+          if (!showGallery && showControls && readerImages.isNotEmpty)
             Positioned(
               top: 40,
               left: 12,
@@ -1453,7 +1830,7 @@ class _ReaderPageState extends State<ReaderPage> {
                 },
               ),
             ),
-          if (isFolder || readerImages.isEmpty)
+          if (showGallery || readerImages.isEmpty)
             Positioned(
               top: 40,
               left: 10,
@@ -1725,15 +2102,20 @@ class _ReaderComfortSheet extends StatelessWidget {
 
 class ReaderGalleryPage extends StatelessWidget {
   final List<DriveImage> folderImages;
+  final String sourceLink;
 
-  const ReaderGalleryPage({super.key, required this.folderImages});
+  const ReaderGalleryPage({
+    super.key,
+    required this.folderImages,
+    required this.sourceLink,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         children: [
-          _GalleryGrid(folderImages: folderImages),
+          _GalleryGrid(folderImages: folderImages, sourceLink: sourceLink),
           Positioned(
             top: 40,
             left: 10,
@@ -1759,8 +2141,9 @@ class ReaderGalleryPage extends StatelessWidget {
 
 class _GalleryGrid extends StatelessWidget {
   final List<DriveImage> folderImages;
+  final String sourceLink;
 
-  const _GalleryGrid({required this.folderImages});
+  const _GalleryGrid({required this.folderImages, required this.sourceLink});
 
   @override
   Widget build(BuildContext context) {
@@ -1835,9 +2218,10 @@ class _GalleryGrid extends StatelessWidget {
                         context,
                         MaterialPageRoute(
                           builder: (context) => ReaderPage(
-                            link: folderImages[index].fullUrl,
+                            link: sourceLink,
                             images: folderImages,
                             initialIndex: index,
+                            startInGallery: false,
                           ),
                         ),
                       );

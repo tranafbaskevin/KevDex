@@ -6,6 +6,7 @@ import 'package:drivereader/main.dart';
 void main() {
   testWidgets('Home screen shows KevDex identity', (WidgetTester tester) async {
     readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[];
     uiBackgroundNotifier.value = defaultUiBackground;
     readerComfortNotifier.value = defaultReaderComfortSettings;
 
@@ -25,6 +26,7 @@ void main() {
       images: [],
       pageIndex: 0,
     );
+    libraryNotifier.value = const <LibraryItem>[];
     uiBackgroundNotifier.value = defaultUiBackground;
     readerComfortNotifier.value = defaultReaderComfortSettings;
 
@@ -34,14 +36,40 @@ void main() {
     expect(find.text('Page 1 / 1'), findsOneWidget);
 
     readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[];
     uiBackgroundNotifier.value = defaultUiBackground;
     readerComfortNotifier.value = defaultReaderComfortSettings;
+  });
+
+  testWidgets('Home screen shows saved library items', (
+    WidgetTester tester,
+  ) async {
+    readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[
+      LibraryItem(
+        sourceLink: 'saved-library-link',
+        images: [],
+        pageIndex: 0,
+        updatedAtMs: 1,
+      ),
+    ];
+    uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
+
+    await tester.pumpWidget(const DriveReaderApp());
+
+    expect(find.text('Library'), findsOneWidget);
+    expect(find.text('Single Page'), findsOneWidget);
+    expect(find.text('Page 1 / 1'), findsOneWidget);
+
+    libraryNotifier.value = const <LibraryItem>[];
   });
 
   testWidgets('Reader empty state uses manga-friendly copy', (
     WidgetTester tester,
   ) async {
     readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[];
     uiBackgroundNotifier.value = defaultUiBackground;
     readerComfortNotifier.value = defaultReaderComfortSettings;
 
@@ -53,5 +81,34 @@ void main() {
 
     expect(find.text('This page could not be opened.'), findsOneWidget);
     expect(find.text('Check the link or try again.'), findsOneWidget);
+  });
+
+  testWidgets('Folder reader keeps reader controls after gallery selection', (
+    WidgetTester tester,
+  ) async {
+    readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[];
+    uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: ReaderPage(
+          link: 'https://drive.google.com/drive/folders/folder-id',
+          images: [
+            DriveImage(thumbnailUrl: 'page-1-thumb', fullUrl: 'page-1-full'),
+            DriveImage(thumbnailUrl: 'page-2-thumb', fullUrl: 'page-2-full'),
+          ],
+          initialIndex: 0,
+          startInGallery: false,
+        ),
+      ),
+    );
+
+    expect(find.text('Page 1 / 2'), findsOneWidget);
+    expect(find.byTooltip('Gallery'), findsOneWidget);
+    expect(find.byTooltip('Reader comfort'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 3));
   });
 }
