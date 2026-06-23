@@ -4,6 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:drivereader/main.dart';
 
 void main() {
+  test('MangaDex chapter links are detected', () {
+    const chapterId = '2a1d7c6c-1234-4abc-8def-1234567890ab';
+
+    expect(
+      extractMangaDexChapterId('https://mangadex.org/chapter/$chapterId/1'),
+      chapterId,
+    );
+    expect(detectStorySource(chapterId), StorySourceType.mangaDexChapter);
+  });
+
   testWidgets('Home screen shows KevDex identity', (WidgetTester tester) async {
     readingProgressNotifier.value = null;
     libraryNotifier.value = const <LibraryItem>[];
@@ -61,6 +71,29 @@ void main() {
     expect(find.text('Library'), findsOneWidget);
     expect(find.text('Single Page'), findsOneWidget);
     expect(find.text('Page 1 / 1'), findsOneWidget);
+
+    libraryNotifier.value = const <LibraryItem>[];
+  });
+
+  testWidgets('Home screen labels MangaDex library items', (
+    WidgetTester tester,
+  ) async {
+    readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[
+      LibraryItem(
+        sourceLink:
+            'https://mangadex.org/chapter/2a1d7c6c-1234-4abc-8def-1234567890ab',
+        images: [],
+        pageIndex: 0,
+        updatedAtMs: 1,
+      ),
+    ];
+    uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
+
+    await tester.pumpWidget(const DriveReaderApp());
+
+    expect(find.text('MangaDex Chapter'), findsOneWidget);
 
     libraryNotifier.value = const <LibraryItem>[];
   });

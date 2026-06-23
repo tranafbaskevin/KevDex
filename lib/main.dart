@@ -24,6 +24,8 @@ const String _eyeBackgroundAsset = 'assets/images/kevdex_bg_manga_eye.png';
 const String _shadowBackgroundAsset =
     'assets/images/kevdex_bg_manga_shadow.png';
 
+enum StorySourceType { driveFolder, mangaDexChapter, singlePage }
+
 Color _backgroundOverlay(double opacity) {
   final alpha = (opacity.clamp(0.0, 1.0) * 255).round();
   return _appBackground.withAlpha(alpha);
@@ -152,6 +154,10 @@ class LibraryItem {
   int get currentPage => pageIndex + 1;
 
   String get title {
+    if (isMangaDexChapterLink(sourceLink)) {
+      return 'MangaDex Chapter';
+    }
+
     if (isDriveFolderLink(sourceLink) || images.length > 1) {
       return 'Drive Folder';
     }
@@ -648,7 +654,9 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    final sourceType = detectStorySource(link);
     final folderId = extractDriveFolderId(link);
+    final mangaDexChapterId = extractMangaDexChapterId(link);
 
     List<DriveImage> images = [];
     await KevDexMemory.saveLastLink(link);
@@ -658,7 +666,10 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      if (folderId != null) {
+      if (sourceType == StorySourceType.mangaDexChapter &&
+          mangaDexChapterId != null) {
+        images = await fetchMangaDexChapterImages(mangaDexChapterId);
+      } else if (folderId != null) {
         images = await fetchDriveFolderImages(folderId);
       }
     } finally {
@@ -690,7 +701,7 @@ class _HomePageState extends State<HomePage> {
           link: link,
           images: images,
           initialIndex: 0,
-          startInGallery: folderId != null,
+          startInGallery: sourceType == StorySourceType.driveFolder,
         ),
       ),
     );
@@ -795,7 +806,7 @@ class _HomePageState extends State<HomePage> {
                       controller: linkController,
                       textInputAction: TextInputAction.done,
                       decoration: InputDecoration(
-                        hintText: 'https://drive.google.com/...',
+                        hintText: 'Google Drive / MangaDex chapter link',
                         prefixIcon: const Icon(Icons.link_rounded),
                         suffixIcon: IconButton(
                           tooltip: 'Clear',
@@ -1213,7 +1224,7 @@ class _KevDexHeader extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         const Text(
-          'Google Drive / Manga Reader',
+          'Google Drive / MangaDex Reader',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: _mutedText,
@@ -2443,6 +2454,22 @@ bool isDriveFolderLink(String link) {
   return link.contains('/drive/folders/');
 }
 
+bool isMangaDexChapterLink(String link) {
+  return extractMangaDexChapterId(link) != null;
+}
+
+StorySourceType detectStorySource(String link) {
+  if (extractMangaDexChapterId(link) != null) {
+    return StorySourceType.mangaDexChapter;
+  }
+
+  if (extractDriveFolderId(link) != null) {
+    return StorySourceType.driveFolder;
+  }
+
+  return StorySourceType.singlePage;
+}
+
 String? extractDriveFolderId(String link) {
   final regExp = RegExp(r'/folders/([^/?]+)');
   final match = regExp.firstMatch(link);
@@ -2452,6 +2479,26 @@ String? extractDriveFolderId(String link) {
   }
 
   return match.group(1);
+}
+
+String? extractMangaDexChapterId(String link) {
+  const uuidPattern =
+      r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+  final chapterPathMatch = RegExp(
+    '/chapter/($uuidPattern)',
+    caseSensitive: false,
+  ).firstMatch(link);
+
+  if (chapterPathMatch != null) {
+    return chapterPathMatch.group(1);
+  }
+
+  final directIdMatch = RegExp(
+    '^$uuidPattern\$',
+    caseSensitive: false,
+  ).firstMatch(link.trim());
+
+  return directIdMatch?.group(0);
 }
 
 Future<List<DriveImage>> fetchDriveFolderImages(String folderId) async {
@@ -2483,6 +2530,45 @@ Future<List<DriveImage>> fetchDriveFolderImages(String folderId) async {
         return DriveImage(thumbnailUrl: thumbnailUrl, fullUrl: fullUrl);
       })
       .toList();
+}
+
+Future<List<DriveImage>> fetchMangaDexChapterImages(String chapterId) async {
+  final response = await http.get(
+    Uri.https('api.mangadex.org', '/at-home/server/$chapterId'),
+  );
+
+  if (response.statusCode != 200) {
+    return [];
+  }
+
+  final data = jsonDecode(response.body);
+
+  if (data is! Map<String, Object?>) {
+    return [];
+  }
+
+  final baseUrl = data['baseUrl'];
+  final chapter = data['chapter'];
+
+  if (baseUrl is! String || chapter is! Map<String, Object?>) {
+    return [];
+  }
+
+  final hash = chapter['hash'];
+  final pages = chapter['data'];
+
+  if (hash is! String || pages is! List) {
+    return [];
+  }
+
+  return pages
+      .whereType<String>()
+      .map<DriveImage>((pageFileName) {
+        final pageUrl = '$baseUrl/data/$hash/$pageFileName';
+
+        return DriveImage(thumbnailUrl: pageUrl, fullUrl: pageUrl);
+      })
+      .toList(growable: false);
 }
 
 String? convertDriveLinkToImageUrl(String link) {
