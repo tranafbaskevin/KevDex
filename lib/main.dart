@@ -7,9 +7,16 @@ import 'package:http/http.dart' as http;
 const Color _appBackground = Color(0xFF101016);
 const Color _surfaceColor = Color(0xFF1A1A22);
 const Color _fieldColor = Color(0xFF20202A);
+const Color _glassSurfaceColor = Color(0xE61A1A22);
 const Color _primaryAccent = Color(0xFF9BE7C9);
 const Color _secondaryAccent = Color(0xFFFFB86B);
 const Color _mutedText = Color(0xFFB7B6C6);
+const String _homeBackgroundAsset = 'assets/images/kevdex_anime_library_bg.png';
+
+Color _backgroundOverlay(double opacity) {
+  final alpha = (opacity.clamp(0.0, 1.0) * 255).round();
+  return _appBackground.withAlpha(alpha);
+}
 
 void main() {
   runApp(const DriveReaderApp());
@@ -178,94 +185,131 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const _KevDexHeader(),
-                  const SizedBox(height: 28),
-                  ValueListenableBuilder<ReadingProgress?>(
-                    valueListenable: readingProgressNotifier,
-                    builder: (context, progress, child) {
-                      if (progress == null) {
-                        return const SizedBox.shrink();
-                      }
+      body: _KevDexBackground(
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _KevDexHeader(),
+                    const SizedBox(height: 28),
+                    ValueListenableBuilder<ReadingProgress?>(
+                      valueListenable: readingProgressNotifier,
+                      builder: (context, progress, child) {
+                        if (progress == null) {
+                          return const SizedBox.shrink();
+                        }
 
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 20),
-                        child: _ContinueReadingCard(
-                          progress: progress,
-                          onTap: () => _continueReading(progress),
-                        ),
-                      );
-                    },
-                  ),
-                  TextField(
-                    controller: linkController,
-                    textInputAction: TextInputAction.done,
-                    decoration: InputDecoration(
-                      hintText: 'https://drive.google.com/...',
-                      prefixIcon: const Icon(Icons.link_rounded),
-                      suffixIcon: IconButton(
-                        tooltip: 'Clear',
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: linkController.clear,
-                      ),
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          child: _ContinueReadingCard(
+                            progress: progress,
+                            onTap: () => _continueReading(progress),
+                          ),
+                        );
+                      },
                     ),
-                    onSubmitted: (_) => _openReader(),
-                  ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    height: 54,
-                    child: ElevatedButton.icon(
-                      onPressed: isOpening ? null : _openReader,
-                      icon: isOpening
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.2,
-                                color: Color(0xFF121217),
-                              ),
-                            )
-                          : const Icon(Icons.menu_book_rounded),
-                      label: Text(
-                        isOpening ? 'Gathering pages...' : 'Open Reader',
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _primaryAccent,
-                        foregroundColor: const Color(0xFF121217),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        textStyle: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
+                    TextField(
+                      controller: linkController,
+                      textInputAction: TextInputAction.done,
+                      decoration: InputDecoration(
+                        hintText: 'https://drive.google.com/...',
+                        prefixIcon: const Icon(Icons.link_rounded),
+                        suffixIcon: IconButton(
+                          tooltip: 'Clear',
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: linkController.clear,
                         ),
                       ),
+                      onSubmitted: (_) => _openReader(),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'By Kevin and Dora-chan',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: _mutedText,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      height: 54,
+                      child: ElevatedButton.icon(
+                        onPressed: isOpening ? null : _openReader,
+                        icon: isOpening
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Color(0xFF121217),
+                                ),
+                              )
+                            : const Icon(Icons.menu_book_rounded),
+                        label: Text(
+                          isOpening ? 'Gathering pages...' : 'Open Reader',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _primaryAccent,
+                          foregroundColor: const Color(0xFF121217),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 20),
+                    const Text(
+                      'By Kevin and Dora-chan',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _mutedText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _KevDexBackground extends StatelessWidget {
+  final Widget child;
+  final double overlayOpacity;
+
+  const _KevDexBackground({required this.child, this.overlayOpacity = 0.74});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.asset(
+          _homeBackgroundAsset,
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                _backgroundOverlay(overlayOpacity * 0.72),
+                _backgroundOverlay(overlayOpacity),
+                _backgroundOverlay(overlayOpacity * 0.92),
+              ],
+            ),
+          ),
+        ),
+        child,
+      ],
     );
   }
 }
@@ -282,7 +326,7 @@ class _KevDexHeader extends StatelessWidget {
           width: 92,
           height: 92,
           decoration: BoxDecoration(
-            color: _surfaceColor,
+            color: _glassSurfaceColor,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: const Color(0xFF2F2D39)),
             boxShadow: const [
@@ -796,83 +840,89 @@ class _GalleryGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (folderImages.isEmpty) {
-      return const _ReaderMessageState(
-        icon: Icons.auto_stories_rounded,
-        title: 'No pages found in this folder.',
-        message: 'Try another Google Drive folder.',
+      return const _KevDexBackground(
+        overlayOpacity: 0.82,
+        child: _ReaderMessageState(
+          icon: Icons.auto_stories_rounded,
+          title: 'No pages found in this folder.',
+          message: 'Try another Google Drive folder.',
+        ),
       );
     }
 
-    return SafeArea(
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 72, 16, 10),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Gallery',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _surfaceColor,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: const Color(0xFF2F2D39)),
-                  ),
-                  child: Text(
-                    '${folderImages.length} pages',
-                    style: const TextStyle(
-                      color: _mutedText,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-              itemCount: folderImages.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 14,
-                crossAxisSpacing: 14,
-                childAspectRatio: 0.72,
-              ),
-              itemBuilder: (context, index) {
-                return _GalleryPageCard(
-                  image: folderImages[index],
-                  pageNumber: index + 1,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ReaderPage(
-                          link: folderImages[index].fullUrl,
-                          images: folderImages,
-                          initialIndex: index,
-                        ),
+    return _KevDexBackground(
+      overlayOpacity: 0.82,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 72, 16, 10),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Gallery',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
                       ),
-                    );
-                  },
-                );
-              },
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _glassSurfaceColor,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: const Color(0xFF2F2D39)),
+                    ),
+                    child: Text(
+                      '${folderImages.length} pages',
+                      style: const TextStyle(
+                        color: _mutedText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            Expanded(
+              child: GridView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                itemCount: folderImages.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 14,
+                  crossAxisSpacing: 14,
+                  childAspectRatio: 0.72,
+                ),
+                itemBuilder: (context, index) {
+                  return _GalleryPageCard(
+                    image: folderImages[index],
+                    pageNumber: index + 1,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ReaderPage(
+                            link: folderImages[index].fullUrl,
+                            images: folderImages,
+                            initialIndex: index,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -898,7 +948,7 @@ class _GalleryPageCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         child: Ink(
           decoration: BoxDecoration(
-            color: _surfaceColor,
+            color: _glassSurfaceColor,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: const Color(0xFF2F2D39)),
             boxShadow: const [
