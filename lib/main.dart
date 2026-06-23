@@ -77,6 +77,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final TextEditingController linkController = TextEditingController();
+  bool isOpening = false;
 
   @override
   void dispose() {
@@ -85,12 +86,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openReader() async {
+    if (isOpening) {
+      return;
+    }
+
     final link = linkController.text.trim();
 
     if (link.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Paste a link first.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Paste a story link first.')),
+      );
       return;
     }
 
@@ -98,8 +103,20 @@ class _HomePageState extends State<HomePage> {
 
     List<DriveImage> images = [];
 
-    if (folderId != null) {
-      images = await fetchDriveFolderImages(folderId);
+    setState(() {
+      isOpening = true;
+    });
+
+    try {
+      if (folderId != null) {
+        images = await fetchDriveFolderImages(folderId);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isOpening = false;
+        });
+      }
     }
 
     if (!mounted) {
@@ -147,9 +164,20 @@ class _HomePageState extends State<HomePage> {
                   SizedBox(
                     height: 54,
                     child: ElevatedButton.icon(
-                      onPressed: _openReader,
-                      icon: const Icon(Icons.menu_book_rounded),
-                      label: const Text('Open Reader'),
+                      onPressed: isOpening ? null : _openReader,
+                      icon: isOpening
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                                color: Color(0xFF121217),
+                              ),
+                            )
+                          : const Icon(Icons.menu_book_rounded),
+                      label: Text(
+                        isOpening ? 'Gathering pages...' : 'Open Reader',
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _primaryAccent,
                         foregroundColor: const Color(0xFF121217),
@@ -266,16 +294,23 @@ class ReaderPage extends StatefulWidget {
 
 class _ReaderPageState extends State<ReaderPage> {
   late final PageController pageController;
-  bool showControls = false;
+  late int currentPageIndex;
+  bool showControls = true;
+  int _hideControlsToken = 0;
 
   @override
   void initState() {
     super.initState();
+    currentPageIndex = widget.initialIndex;
     pageController = PageController(initialPage: widget.initialIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scheduleControlsHide();
+    });
   }
 
   @override
   void dispose() {
+    _hideControlsToken++;
     pageController.dispose();
     super.dispose();
   }
@@ -292,12 +327,74 @@ class _ReaderPageState extends State<ReaderPage> {
     return [DriveImage(thumbnailUrl: singleImageUrl, fullUrl: singleImageUrl)];
   }
 
+  void _scheduleControlsHide() {
+    final token = ++_hideControlsToken;
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted || token != _hideControlsToken || !showControls) {
+        return;
+      }
+
+      setState(() {
+        showControls = false;
+      });
+    });
+  }
+
+  void _showControlsTemporarily() {
+    if (!showControls) {
+      setState(() {
+        showControls = true;
+      });
+    }
+
+    _scheduleControlsHide();
+  }
+
+  void _toggleReaderControls() {
+    if (showControls) {
+      _hideControlsToken++;
+      setState(() {
+        showControls = false;
+      });
+      return;
+    }
+
+    _showControlsTemporarily();
+  }
+
+  void _goToPreviousPage() {
+    if (currentPageIndex <= 0) {
+      return;
+    }
+
+    _showControlsTemporarily();
+    pageController.previousPage(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _goToNextPage(int pageCount) {
+    if (currentPageIndex >= pageCount - 1) {
+      return;
+    }
+
+    _showControlsTemporarily();
+    pageController.nextPage(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isFolder = isDriveFolderLink(widget.link);
     final singleImageUrl = convertDriveLinkToImageUrl(widget.link);
     final folderImages = widget.images;
     final readerImages = _resolveReaderImages(isFolder, singleImageUrl);
+    final pageCount = readerImages.length;
+    final progress = pageCount == 0 ? 0.0 : (currentPageIndex + 1) / pageCount;
 
     void preloadImage(String url) {
       precacheImage(NetworkImage(url), context);
@@ -313,20 +410,6 @@ class _ReaderPageState extends State<ReaderPage> {
       }
     }
 
-    void showReaderControls() {
-      setState(() {
-        showControls = true;
-      });
-
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          setState(() {
-            showControls = false;
-          });
-        }
-      });
-    }
-
     return Scaffold(
       body: Stack(
         children: [
@@ -334,42 +417,42 @@ class _ReaderPageState extends State<ReaderPage> {
             child: isFolder
                 ? _GalleryGrid(folderImages: folderImages)
                 : readerImages.isEmpty
-                ? const _ReaderEmptyState()
+                ? const _ReaderMessageState(
+                    icon: Icons.broken_image_rounded,
+                    title: 'This page could not be opened.',
+                    message: 'Check the link or try again.',
+                  )
                 : PageView.builder(
                     controller: pageController,
+                    onPageChanged: (pageIndex) {
+                      setState(() {
+                        currentPageIndex = pageIndex;
+                      });
+
+                      if (showControls) {
+                        _scheduleControlsHide();
+                      }
+                    },
                     itemCount: readerImages.length,
                     itemBuilder: (context, pageIndex) {
                       preloadAround(pageIndex);
 
                       final currentImage = readerImages[pageIndex];
                       return GestureDetector(
-                        onTap: showReaderControls,
+                        onTap: _toggleReaderControls,
                         child: InteractiveViewer(
                           minScale: 1,
                           maxScale: 5,
                           child: CachedNetworkImage(
                             imageUrl: currentImage.fullUrl,
                             fit: BoxFit.fitWidth,
-                            placeholder: (context, url) => const Center(
-                              child: CircularProgressIndicator(),
-                            ),
+                            placeholder: (context, url) =>
+                                const _MangaLoadingState(),
                             errorWidget: (context, url, error) {
-                              return const Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.broken_image,
-                                      color: Colors.white,
-                                      size: 64,
-                                    ),
-                                    SizedBox(height: 12),
-                                    Text(
-                                      'Failed to load image',
-                                      style: TextStyle(color: Colors.white),
-                                    ),
-                                  ],
-                                ),
+                              return const _ReaderMessageState(
+                                icon: Icons.broken_image_rounded,
+                                title: 'This page could not be opened.',
+                                message: 'Check the link or try again.',
                               );
                             },
                           ),
@@ -395,12 +478,7 @@ class _ReaderPageState extends State<ReaderPage> {
                       color: Colors.white70,
                       size: 42,
                     ),
-                    onPressed: () {
-                      pageController.previousPage(
-                        duration: const Duration(milliseconds: 250),
-                        curve: Curves.easeOut,
-                      );
-                    },
+                    onPressed: currentPageIndex > 0 ? _goToPreviousPage : null,
                   ),
                 ),
               ),
@@ -422,30 +500,110 @@ class _ReaderPageState extends State<ReaderPage> {
                       color: Colors.white70,
                       size: 42,
                     ),
-                    onPressed: () {
-                      pageController.nextPage(
-                        duration: const Duration(milliseconds: 250),
-                        curve: Curves.easeOut,
-                      );
-                    },
+                    onPressed: currentPageIndex < pageCount - 1
+                        ? () => _goToNextPage(pageCount)
+                        : null,
                   ),
                 ),
               ),
             ),
-          Positioned(
-            top: 40,
-            left: 10,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () {
+          if (!isFolder && showControls && readerImages.isNotEmpty)
+            Positioned(
+              top: 40,
+              left: 12,
+              right: 12,
+              child: _ReaderProgressHud(
+                currentPage: currentPageIndex + 1,
+                totalPages: pageCount,
+                progress: progress,
+                onBack: () {
                   Navigator.pop(context);
                 },
               ),
+            ),
+          if (isFolder || readerImages.isEmpty)
+            Positioned(
+              top: 40,
+              left: 10,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReaderProgressHud extends StatelessWidget {
+  final int currentPage;
+  final int totalPages;
+  final double progress;
+  final VoidCallback onBack;
+
+  const _ReaderProgressHud({
+    required this.currentPage,
+    required this.totalPages,
+    required this.progress,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 6, 12, 10),
+      decoration: BoxDecoration(
+        color: const Color(0xDD101016),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF2F2D39)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: IconButton(
+              tooltip: 'Back',
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              onPressed: onBack,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Page $currentPage / $totalPages',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    minHeight: 4,
+                    value: progress.clamp(0.0, 1.0).toDouble(),
+                    backgroundColor: const Color(0xFF2C2A35),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      _primaryAccent,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -462,7 +620,11 @@ class _GalleryGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (folderImages.isEmpty) {
-      return const _ReaderEmptyState(message: 'No images found.');
+      return const _ReaderMessageState(
+        icon: Icons.auto_stories_rounded,
+        title: 'No pages found in this folder.',
+        message: 'Try another Google Drive folder.',
+      );
     }
 
     return GridView.count(
@@ -517,21 +679,78 @@ class _GalleryGrid extends StatelessWidget {
   }
 }
 
-class _ReaderEmptyState extends StatelessWidget {
+class _MangaLoadingState extends StatelessWidget {
+  const _MangaLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.auto_stories_rounded, color: _primaryAccent, size: 42),
+          SizedBox(height: 14),
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: _primaryAccent,
+            ),
+          ),
+          SizedBox(height: 14),
+          Text(
+            'Loading page...',
+            style: TextStyle(
+              color: _mutedText,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReaderMessageState extends StatelessWidget {
+  final IconData icon;
+  final String title;
   final String message;
 
-  const _ReaderEmptyState({this.message = 'Failed to load image.'});
+  const _ReaderMessageState({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.broken_image, color: Colors.white70, size: 64),
-          const SizedBox(height: 12),
-          Text(message, style: const TextStyle(color: Colors.white70)),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white70, size: 58),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _mutedText, fontSize: 13),
+            ),
+          ],
+        ),
       ),
     );
   }
