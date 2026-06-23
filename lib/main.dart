@@ -648,6 +648,35 @@ class KevDexMemory {
     await preferences.setString(_readerComfortKey, jsonEncode(settings));
   }
 
+  static Future<void> clearAppCache() async {
+    final preferences = await _loadPreferences();
+    final cachedUrls = _cachedImageUrls();
+
+    await Future.wait([
+      preferences.remove(_lastLinkKey),
+      preferences.remove(_lastDriveLinkKey),
+      preferences.remove(_lastMangaDexLinkKey),
+      preferences.remove(_readerProgressKey),
+      preferences.remove(_libraryKey),
+      preferences.remove(_uiBackgroundKey),
+      preferences.remove(_readerComfortKey),
+    ]);
+
+    lastLink = null;
+    lastDriveLink = null;
+    lastMangaDexLink = null;
+    readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[];
+    uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
+
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+
+    await _evictCachedImages(cachedUrls);
+    await _deleteCustomBackgrounds();
+  }
+
   static Future<UiBackground> saveCustomUiBackground(XFile image) async {
     final appDirectory = await getApplicationDocumentsDirectory();
     final backgroundDirectory = Directory(
@@ -669,6 +698,68 @@ class KevDexMemory {
 
     await saveUiBackground(background);
     return background;
+  }
+
+  static Set<String> _cachedImageUrls() {
+    final urls = <String>{};
+
+    void addImage(DriveImage image) {
+      urls.add(image.thumbnailUrl);
+      urls.add(image.fullUrl);
+    }
+
+    void addProgress(ReadingProgress progress) {
+      for (final image in progress.images) {
+        addImage(image);
+      }
+
+      final thumbnailUrl = progress.thumbnailUrl;
+      if (thumbnailUrl != null) {
+        urls.add(thumbnailUrl);
+      }
+    }
+
+    final progress = readingProgressNotifier.value;
+    if (progress != null) {
+      addProgress(progress);
+    }
+
+    for (final item in libraryNotifier.value) {
+      for (final image in item.images) {
+        addImage(image);
+      }
+
+      final thumbnailUrl = item.thumbnailUrl;
+      if (thumbnailUrl != null) {
+        urls.add(thumbnailUrl);
+      }
+    }
+
+    urls.removeWhere((url) => url.trim().isEmpty);
+    return urls;
+  }
+
+  static Future<void> _evictCachedImages(Set<String> urls) async {
+    await Future.wait(
+      urls.map((url) async {
+        try {
+          await CachedNetworkImage.evictFromCache(url);
+        } catch (_) {}
+      }),
+    );
+  }
+
+  static Future<void> _deleteCustomBackgrounds() async {
+    try {
+      final appDirectory = await getApplicationDocumentsDirectory();
+      final backgroundDirectory = Directory(
+        '${appDirectory.path}${Platform.pathSeparator}kevdex_backgrounds',
+      );
+
+      if (await backgroundDirectory.exists()) {
+        await backgroundDirectory.delete(recursive: true);
+      }
+    } catch (_) {}
   }
 
   static Future<SharedPreferences> _loadPreferences() async {
@@ -904,8 +995,24 @@ class _HomePageState extends State<HomePage> {
           Navigator.pop(context);
           _selectSource(sourceType);
         },
+        onClearCache: _clearCache,
       ),
     );
+  }
+
+  Future<void> _clearCache() async {
+    await KevDexMemory.clearAppCache();
+
+    driveLinkController.clear();
+    mangaDexLinkController.clear();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      selectedSourceType = StorySourceType.driveFolder;
+    });
   }
 
   Future<void> _openReader(StorySourceType requestedSourceType) async {
@@ -1659,11 +1766,57 @@ class _SourceHubPanel extends StatelessWidget {
 class _SourceHubSheet extends StatelessWidget {
   final StorySourceType selectedSourceType;
   final ValueChanged<StorySourceType> onSelectSource;
+  final Future<void> Function() onClearCache;
 
   const _SourceHubSheet({
     required this.selectedSourceType,
     required this.onSelectSource,
+    required this.onClearCache,
   });
+
+  Future<void> _confirmClearCache(BuildContext context) async {
+    final shouldClear = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: _surfaceColor,
+          title: const Text('Clear cache?'),
+          content: const Text(
+            'This removes pasted links, Continue Reading, Library, custom UI background, reader comfort, and cached pages.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFF7A7A),
+                foregroundColor: const Color(0xFF101016),
+              ),
+              child: const Text('Clear'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldClear != true || !context.mounted) {
+      return;
+    }
+
+    await onClearCache();
+
+    if (!context.mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('KevDex cache cleared.')));
+    Navigator.pop(context);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1741,6 +1894,23 @@ class _SourceHubSheet extends StatelessWidget {
                     const SizedBox(height: 10),
                 ],
               ],
+              const SizedBox(height: 18),
+              Tooltip(
+                message: 'Clear app cache',
+                child: OutlinedButton.icon(
+                  onPressed: () => _confirmClearCache(context),
+                  icon: const Icon(Icons.cleaning_services_rounded),
+                  label: const Text('Clear Cache'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFFFB0B0),
+                    side: const BorderSide(color: Color(0xFF7A3E46)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

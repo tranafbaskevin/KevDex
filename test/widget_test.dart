@@ -64,6 +64,27 @@ void main() {
     expect(find.text('Planned'), findsOneWidget);
     expect(find.text('NHentai'), findsOneWidget);
     expect(find.text('Hitomi'), findsOneWidget);
+    expect(find.byTooltip('Clear app cache'), findsOneWidget);
+  });
+
+  testWidgets('Source Hub confirms before clearing cache', (
+    WidgetTester tester,
+  ) async {
+    readingProgressNotifier.value = null;
+    libraryNotifier.value = const <LibraryItem>[];
+    uiBackgroundNotifier.value = defaultUiBackground;
+    readerComfortNotifier.value = defaultReaderComfortSettings;
+
+    await tester.pumpWidget(const DriveReaderApp());
+
+    await tester.tap(find.byTooltip('Manage sources'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Clear app cache'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clear cache?'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.text('Clear'), findsOneWidget);
   });
 
   testWidgets('Home screen shows continue reading when progress exists', (
