@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const Color _appBackground = Color(0xFF101016);
 const Color _surfaceColor = Color(0xFF1A1A22);
@@ -26,7 +29,9 @@ Color _backgroundOverlay(double opacity) {
   return _appBackground.withAlpha(alpha);
 }
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await KevDexMemory.load();
   runApp(const DriveReaderApp());
 }
 
@@ -35,6 +40,25 @@ class DriveImage {
   final String fullUrl;
 
   const DriveImage({required this.thumbnailUrl, required this.fullUrl});
+
+  Map<String, String> toJson() {
+    return {'thumbnailUrl': thumbnailUrl, 'fullUrl': fullUrl};
+  }
+
+  static DriveImage? fromJson(Object? value) {
+    if (value is! Map<String, Object?>) {
+      return null;
+    }
+
+    final thumbnailUrl = value['thumbnailUrl'];
+    final fullUrl = value['fullUrl'];
+
+    if (thumbnailUrl is! String || fullUrl is! String) {
+      return null;
+    }
+
+    return DriveImage(thumbnailUrl: thumbnailUrl, fullUrl: fullUrl);
+  }
 }
 
 class ReadingProgress {
@@ -62,6 +86,41 @@ class ReadingProgress {
     final safeIndex = pageIndex.clamp(0, images.length - 1).toInt();
     return images[safeIndex].thumbnailUrl;
   }
+
+  Map<String, Object?> toJson() {
+    return {
+      'sourceLink': sourceLink,
+      'pageIndex': pageIndex,
+      'images': images.map((image) => image.toJson()).toList(),
+    };
+  }
+
+  static ReadingProgress? fromJson(Object? value) {
+    if (value is! Map<String, Object?>) {
+      return null;
+    }
+
+    final sourceLink = value['sourceLink'];
+    final pageIndex = value['pageIndex'];
+    final imagesValue = value['images'];
+
+    if (sourceLink is! String || pageIndex is! int || imagesValue is! List) {
+      return null;
+    }
+
+    final images = imagesValue
+        .map(DriveImage.fromJson)
+        .whereType<DriveImage>()
+        .toList(growable: false);
+
+    return ReadingProgress(
+      sourceLink: sourceLink,
+      images: List<DriveImage>.unmodifiable(images),
+      pageIndex: images.isEmpty
+          ? 0
+          : pageIndex.clamp(0, images.length - 1).toInt(),
+    );
+  }
 }
 
 class UiBackground {
@@ -74,6 +133,35 @@ class UiBackground {
 
   const UiBackground.file({required this.title, required this.path})
     : isAsset = false;
+
+  Map<String, Object?> toJson() {
+    return {'title': title, 'path': path, 'isAsset': isAsset};
+  }
+
+  static UiBackground? fromJson(Object? value) {
+    if (value is! Map<String, Object?>) {
+      return null;
+    }
+
+    final title = value['title'];
+    final path = value['path'];
+    final isAsset = value['isAsset'];
+
+    if (title is! String || path is! String || isAsset is! bool) {
+      return null;
+    }
+
+    if (isAsset) {
+      final preset = _presetUiBackgrounds.where((item) => item.path == path);
+      if (preset.isNotEmpty) {
+        return preset.first;
+      }
+
+      return null;
+    }
+
+    return UiBackground.file(title: title, path: path);
+  }
 }
 
 const UiBackground defaultUiBackground = UiBackground.asset(
@@ -93,6 +181,130 @@ final ValueNotifier<ReadingProgress?> readingProgressNotifier =
 
 final ValueNotifier<UiBackground> uiBackgroundNotifier =
     ValueNotifier<UiBackground>(defaultUiBackground);
+
+class KevDexMemory {
+  static const String _lastLinkKey = 'kevdex.lastLink';
+  static const String _readerProgressKey = 'kevdex.readerProgress';
+  static const String _uiBackgroundKey = 'kevdex.uiBackground';
+  static const String _customBackgroundFileName = 'kevdex_custom_background';
+
+  static SharedPreferences? _preferences;
+  static String? lastLink;
+
+  const KevDexMemory._();
+
+  static Future<void> load() async {
+    final preferences = await _loadPreferences();
+    lastLink = preferences.getString(_lastLinkKey);
+    _restoreReadingProgress(preferences);
+    _restoreUiBackground(preferences);
+  }
+
+  static Future<void> saveLastLink(String link) async {
+    final cleanedLink = link.trim();
+    final preferences = await _loadPreferences();
+
+    if (cleanedLink.isEmpty) {
+      await preferences.remove(_lastLinkKey);
+      lastLink = null;
+      return;
+    }
+
+    lastLink = cleanedLink;
+    await preferences.setString(_lastLinkKey, cleanedLink);
+  }
+
+  static Future<void> saveReadingProgress(ReadingProgress progress) async {
+    final preferences = await _loadPreferences();
+    await preferences.setString(_readerProgressKey, jsonEncode(progress));
+  }
+
+  static Future<void> saveUiBackground(UiBackground background) async {
+    final preferences = await _loadPreferences();
+    await preferences.setString(_uiBackgroundKey, jsonEncode(background));
+  }
+
+  static Future<UiBackground> saveCustomUiBackground(XFile image) async {
+    final appDirectory = await getApplicationDocumentsDirectory();
+    final backgroundDirectory = Directory(
+      '${appDirectory.path}${Platform.pathSeparator}kevdex_backgrounds',
+    );
+    await backgroundDirectory.create(recursive: true);
+
+    final extension = _fileExtension(image.name).isEmpty
+        ? _fileExtension(image.path)
+        : _fileExtension(image.name);
+    final targetPath =
+        '${backgroundDirectory.path}${Platform.pathSeparator}'
+        '$_customBackgroundFileName${extension.isEmpty ? '.jpg' : extension}';
+    final copiedImage = await File(image.path).copy(targetPath);
+    final background = UiBackground.file(
+      title: 'My Image',
+      path: copiedImage.path,
+    );
+
+    await saveUiBackground(background);
+    return background;
+  }
+
+  static Future<SharedPreferences> _loadPreferences() async {
+    return _preferences ??= await SharedPreferences.getInstance();
+  }
+
+  static void _restoreReadingProgress(SharedPreferences preferences) {
+    final rawProgress = preferences.getString(_readerProgressKey);
+
+    if (rawProgress == null) {
+      return;
+    }
+
+    try {
+      final progress = ReadingProgress.fromJson(jsonDecode(rawProgress));
+
+      if (progress != null) {
+        readingProgressNotifier.value = progress;
+      }
+    } on FormatException {
+      preferences.remove(_readerProgressKey);
+    }
+  }
+
+  static void _restoreUiBackground(SharedPreferences preferences) {
+    final rawBackground = preferences.getString(_uiBackgroundKey);
+
+    if (rawBackground == null) {
+      return;
+    }
+
+    try {
+      final background = UiBackground.fromJson(jsonDecode(rawBackground));
+
+      if (background == null) {
+        return;
+      }
+
+      if (!background.isAsset && !File(background.path).existsSync()) {
+        return;
+      }
+
+      uiBackgroundNotifier.value = background;
+    } on FormatException {
+      preferences.remove(_uiBackgroundKey);
+    }
+  }
+
+  static String _fileExtension(String path) {
+    final normalizedPath = path.replaceAll('\\', '/');
+    final fileName = normalizedPath.split('/').last;
+    final dotIndex = fileName.lastIndexOf('.');
+
+    if (dotIndex < 0 || dotIndex == fileName.length - 1) {
+      return '';
+    }
+
+    return fileName.substring(dotIndex).toLowerCase();
+  }
+}
 
 class DriveReaderApp extends StatelessWidget {
   const DriveReaderApp({super.key});
@@ -152,6 +364,16 @@ class _HomePageState extends State<HomePage> {
   bool isOpening = false;
 
   @override
+  void initState() {
+    super.initState();
+    final savedLink = KevDexMemory.lastLink;
+
+    if (savedLink != null && savedLink.isNotEmpty) {
+      linkController.text = savedLink;
+    }
+  }
+
+  @override
   void dispose() {
     linkController.dispose();
     super.dispose();
@@ -174,6 +396,7 @@ class _HomePageState extends State<HomePage> {
     final folderId = extractDriveFolderId(link);
 
     List<DriveImage> images = [];
+    await KevDexMemory.saveLastLink(link);
 
     setState(() {
       isOpening = true;
@@ -274,7 +497,10 @@ class _HomePageState extends State<HomePage> {
                         suffixIcon: IconButton(
                           tooltip: 'Clear',
                           icon: const Icon(Icons.close_rounded),
-                          onPressed: linkController.clear,
+                          onPressed: () {
+                            linkController.clear();
+                            unawaited(KevDexMemory.saveLastLink(''));
+                          },
                         ),
                       ),
                       onSubmitted: (_) => _openReader(),
@@ -429,10 +655,13 @@ class _BackgroundPickerSheet extends StatelessWidget {
       return;
     }
 
-    uiBackgroundNotifier.value = UiBackground.file(
-      title: 'My Image',
-      path: image.path,
-    );
+    final background = await KevDexMemory.saveCustomUiBackground(image);
+
+    if (!context.mounted) {
+      return;
+    }
+
+    uiBackgroundNotifier.value = background;
     Navigator.pop(context);
   }
 
@@ -524,6 +753,7 @@ class _BackgroundPickerSheet extends StatelessWidget {
               TextButton.icon(
                 onPressed: () {
                   uiBackgroundNotifier.value = defaultUiBackground;
+                  unawaited(KevDexMemory.saveUiBackground(defaultUiBackground));
                   Navigator.pop(context);
                 },
                 icon: const Icon(Icons.restart_alt_rounded),
@@ -560,6 +790,7 @@ class _BackgroundPresetTile extends StatelessWidget {
           child: InkWell(
             onTap: () {
               uiBackgroundNotifier.value = background;
+              unawaited(KevDexMemory.saveUiBackground(background));
               Navigator.pop(context);
             },
             borderRadius: BorderRadius.circular(8),
@@ -904,11 +1135,14 @@ class _ReaderPageState extends State<ReaderPage> {
     _lastSavedSourceLink = widget.link;
     _lastSavedPageIndex = pageIndex;
 
-    readingProgressNotifier.value = ReadingProgress(
+    final progress = ReadingProgress(
       sourceLink: widget.link,
       images: List<DriveImage>.unmodifiable(readerImages),
       pageIndex: pageIndex.clamp(0, readerImages.length - 1).toInt(),
     );
+
+    readingProgressNotifier.value = progress;
+    unawaited(KevDexMemory.saveReadingProgress(progress));
   }
 
   @override
