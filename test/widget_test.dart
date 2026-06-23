@@ -5,6 +5,8 @@ import 'package:drivereader/main.dart';
 
 void main() {
   testWidgets('Home screen shows KevDex identity', (WidgetTester tester) async {
+    readingProgressNotifier.value = null;
+
     await tester.pumpWidget(const DriveReaderApp());
 
     expect(find.text('KevDex'), findsOneWidget);
@@ -13,9 +15,28 @@ void main() {
     expect(find.text('By Kevin and Dora-chan'), findsOneWidget);
   });
 
+  testWidgets('Home screen shows continue reading when progress exists', (
+    WidgetTester tester,
+  ) async {
+    readingProgressNotifier.value = const ReadingProgress(
+      sourceLink: 'not-a-drive-link',
+      images: [],
+      pageIndex: 0,
+    );
+
+    await tester.pumpWidget(const DriveReaderApp());
+
+    expect(find.text('Continue Reading'), findsOneWidget);
+    expect(find.text('Page 1 / 1'), findsOneWidget);
+
+    readingProgressNotifier.value = null;
+  });
+
   testWidgets('Reader empty state uses manga-friendly copy', (
     WidgetTester tester,
   ) async {
+    readingProgressNotifier.value = null;
+
     await tester.pumpWidget(
       const MaterialApp(
         home: ReaderPage(link: 'not-a-drive-link', images: [], initialIndex: 0),

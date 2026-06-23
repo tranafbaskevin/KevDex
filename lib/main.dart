@@ -22,6 +22,36 @@ class DriveImage {
   const DriveImage({required this.thumbnailUrl, required this.fullUrl});
 }
 
+class ReadingProgress {
+  final String sourceLink;
+  final List<DriveImage> images;
+  final int pageIndex;
+
+  const ReadingProgress({
+    required this.sourceLink,
+    required this.images,
+    required this.pageIndex,
+  });
+
+  int get totalPages => images.isEmpty ? 1 : images.length;
+
+  int get currentPage => pageIndex + 1;
+
+  String get pageLabel => 'Page $currentPage / $totalPages';
+
+  String? get thumbnailUrl {
+    if (images.isEmpty) {
+      return convertDriveLinkToImageUrl(sourceLink);
+    }
+
+    final safeIndex = pageIndex.clamp(0, images.length - 1).toInt();
+    return images[safeIndex].thumbnailUrl;
+  }
+}
+
+final ValueNotifier<ReadingProgress?> readingProgressNotifier =
+    ValueNotifier<ReadingProgress?>(null);
+
 class DriveReaderApp extends StatelessWidget {
   const DriveReaderApp({super.key});
 
@@ -132,6 +162,19 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _continueReading(ReadingProgress progress) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReaderPage(
+          link: progress.sourceLink,
+          images: progress.images,
+          initialIndex: progress.pageIndex,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -146,6 +189,22 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   const _KevDexHeader(),
                   const SizedBox(height: 28),
+                  ValueListenableBuilder<ReadingProgress?>(
+                    valueListenable: readingProgressNotifier,
+                    builder: (context, progress, child) {
+                      if (progress == null) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        child: _ContinueReadingCard(
+                          progress: progress,
+                          onTap: () => _continueReading(progress),
+                        ),
+                      );
+                    },
+                  ),
                   TextField(
                     controller: linkController,
                     textInputAction: TextInputAction.done,
@@ -276,6 +335,92 @@ class _KevDexHeader extends StatelessWidget {
   }
 }
 
+class _ContinueReadingCard extends StatelessWidget {
+  final ReadingProgress progress;
+  final VoidCallback onTap;
+
+  const _ContinueReadingCard({required this.progress, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final thumbnailUrl = progress.thumbnailUrl;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Ink(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _surfaceColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF2F2D39)),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  width: 64,
+                  height: 78,
+                  child: thumbnailUrl == null
+                      ? const ColoredBox(
+                          color: _fieldColor,
+                          child: Icon(
+                            Icons.auto_stories_rounded,
+                            color: _primaryAccent,
+                          ),
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: thumbnailUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) =>
+                              const _ThumbnailPlaceholder(),
+                          errorWidget: (context, url, error) =>
+                              const _ThumbnailPlaceholder(),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Continue Reading',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      progress.pageLabel,
+                      style: const TextStyle(
+                        color: _mutedText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.play_arrow_rounded,
+                color: _primaryAccent,
+                size: 32,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ReaderPage extends StatefulWidget {
   final String link;
   final List<DriveImage> images;
@@ -297,6 +442,8 @@ class _ReaderPageState extends State<ReaderPage> {
   late int currentPageIndex;
   bool showControls = true;
   int _hideControlsToken = 0;
+  int? _lastSavedPageIndex;
+  String? _lastSavedSourceLink;
 
   @override
   void initState() {
@@ -387,6 +534,26 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
+  void _saveReadingProgress(List<DriveImage> readerImages, int pageIndex) {
+    if (readerImages.isEmpty) {
+      return;
+    }
+
+    if (_lastSavedSourceLink == widget.link &&
+        _lastSavedPageIndex == pageIndex) {
+      return;
+    }
+
+    _lastSavedSourceLink = widget.link;
+    _lastSavedPageIndex = pageIndex;
+
+    readingProgressNotifier.value = ReadingProgress(
+      sourceLink: widget.link,
+      images: List<DriveImage>.unmodifiable(readerImages),
+      pageIndex: pageIndex.clamp(0, readerImages.length - 1).toInt(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isFolder = isDriveFolderLink(widget.link);
@@ -395,6 +562,14 @@ class _ReaderPageState extends State<ReaderPage> {
     final readerImages = _resolveReaderImages(isFolder, singleImageUrl);
     final pageCount = readerImages.length;
     final progress = pageCount == 0 ? 0.0 : (currentPageIndex + 1) / pageCount;
+
+    if (!isFolder && readerImages.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _saveReadingProgress(readerImages, currentPageIndex);
+        }
+      });
+    }
 
     void preloadImage(String url) {
       precacheImage(NetworkImage(url), context);
@@ -428,6 +603,7 @@ class _ReaderPageState extends State<ReaderPage> {
                       setState(() {
                         currentPageIndex = pageIndex;
                       });
+                      _saveReadingProgress(readerImages, pageIndex);
 
                       if (showControls) {
                         _scheduleControlsHide();
@@ -627,54 +803,202 @@ class _GalleryGrid extends StatelessWidget {
       );
     }
 
-    return GridView.count(
-      crossAxisCount: 2,
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      padding: const EdgeInsets.all(16),
-      children: List.generate(folderImages.length, (index) {
-        return InkWell(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ReaderPage(
-                  link: folderImages[index].fullUrl,
-                  images: folderImages,
-                  initialIndex: index,
-                ),
-              ),
-            );
-          },
-          child: Card(
-            margin: EdgeInsets.zero,
-            color: Colors.grey[900],
-            clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
+    return SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 72, 16, 10),
+            child: Row(
               children: [
-                Expanded(
-                  child: Image.network(
-                    folderImages[index].thumbnailUrl,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
+                const Expanded(
+                  child: Text(
+                    'Gallery',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _surfaceColor,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0xFF2F2D39)),
+                  ),
                   child: Text(
-                    'Page ${index + 1}',
-                    style: const TextStyle(color: Colors.white),
+                    '${folderImages.length} pages',
+                    style: const TextStyle(
+                      color: _mutedText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        );
-      }),
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              itemCount: folderImages.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 14,
+                crossAxisSpacing: 14,
+                childAspectRatio: 0.72,
+              ),
+              itemBuilder: (context, index) {
+                return _GalleryPageCard(
+                  image: folderImages[index],
+                  pageNumber: index + 1,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ReaderPage(
+                          link: folderImages[index].fullUrl,
+                          images: folderImages,
+                          initialIndex: index,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GalleryPageCard extends StatelessWidget {
+  final DriveImage image;
+  final int pageNumber;
+  final VoidCallback onTap;
+
+  const _GalleryPageCard({
+    required this.image,
+    required this.pageNumber,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: _surfaceColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF2F2D39)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 14,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(8),
+                      ),
+                      child: CachedNetworkImage(
+                        imageUrl: image.thumbnailUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) =>
+                            const _ThumbnailPlaceholder(),
+                        errorWidget: (context, url, error) =>
+                            const _ThumbnailPlaceholder(),
+                      ),
+                    ),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xCC101016),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '#$pageNumber',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.article_rounded,
+                      color: _primaryAccent,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Page $pageNumber',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThumbnailPlaceholder extends StatelessWidget {
+  const _ThumbnailPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: _fieldColor,
+      child: Center(
+        child: Icon(Icons.image_rounded, color: _mutedText, size: 28),
+      ),
     );
   }
 }
