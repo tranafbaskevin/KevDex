@@ -113,6 +113,64 @@ void main() {
     );
   });
 
+  test('MangaDex manga payloads become manga previews', () {
+    final previews = parseMangaDexMangaPreviews({
+      'data': [
+        {
+          'id': 'manga-id-1',
+          'attributes': {
+            'title': {'en': 'Digi Cat'},
+            'description': {'en': 'A cat that digs.'},
+          },
+          'relationships': [
+            {
+              'type': 'cover_art',
+              'attributes': {'fileName': 'cover-file.jpg'},
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(previews, hasLength(1));
+    expect(previews.first.mangaId, 'manga-id-1');
+    expect(previews.first.title, 'Digi Cat');
+    expect(previews.first.description, 'A cat that digs.');
+    expect(
+      previews.first.thumbnailUrl,
+      'https://uploads.mangadex.org/covers/manga-id-1/cover-file.jpg.256.jpg',
+    );
+    expect(previews.first.sourceLink, 'https://mangadex.org/manga/manga-id-1');
+  });
+
+  test('MangaDex feed chapter payloads become chapter previews', () {
+    final previews = parseMangaDexFeedChapters(
+      {
+        'data': [
+          {
+            'id': 'chapter-id-1',
+            'attributes': {
+              'chapter': '10',
+              'title': 'New Beginning',
+              'pages': 18,
+              'translatedLanguage': 'en',
+            },
+          },
+        ],
+      },
+      'manga-id-1',
+      'Digi Cat',
+    );
+
+    expect(previews, hasLength(1));
+    expect(previews.first.chapterId, 'chapter-id-1');
+    expect(previews.first.title, 'Digi Cat');
+    expect(previews.first.chapterLabel, 'Chapter 10 - New Beginning');
+    expect(previews.first.mangaId, 'manga-id-1');
+    expect(previews.first.pageCount, 18);
+    expect(previews.first.language, 'en');
+  });
+
   test('NHentai gallery payloads become reader pages', () {
     final result = parseNHentaiGalleryPayload({
       'media_id': '999999',
@@ -162,7 +220,7 @@ void main() {
     );
     expect(
       result.images.last.fullUrl,
-      'https://w2.gold-usergeneratedcontent.net/1782259201/1349/001122334455.webp',
+      'https://w1.gold-usergeneratedcontent.net/1782259201/1349/001122334455.webp',
     );
   });
 
@@ -212,11 +270,11 @@ void main() {
     expect(image, isNotNull);
     expect(
       image!.thumbnailUrl,
-      'https://w2.gold-usergeneratedcontent.net/1782259201/1605/abcdef123456.webp',
+      'https://w1.gold-usergeneratedcontent.net/1782280801/1605/abcdef123456.webp',
     );
     expect(
       image.fullUrl,
-      'https://w2.gold-usergeneratedcontent.net/1782259201/1349/001122334455.webp',
+      'https://w1.gold-usergeneratedcontent.net/1782280801/1349/001122334455.webp',
     );
   });
 
@@ -524,7 +582,7 @@ void main() {
     libraryNotifier.value = const <LibraryItem>[];
   });
 
-  testWidgets('MangaDex Home shows latest chapter cards', (
+  testWidgets('MangaDex Home shows latest manga cards', (
     WidgetTester tester,
   ) async {
     resetKevDexTestState();
@@ -532,25 +590,25 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: MangaDexHomePage(
-          chapterLoader: () async => const <MangaDexChapterPreview>[
-            MangaDexChapterPreview(
-              chapterId: 'chapter-id-1',
-              sourceLink: 'https://mangadex.org/chapter/chapter-id-1',
-              title: 'Digi Cat',
-              chapterLabel: 'Chapter 5',
-              pageCount: 24,
-              language: 'en',
-            ),
-          ],
+          mangaLoader: ({int? limit, int? offset}) async =>
+              const <MangaDexMangaPreview>[
+                MangaDexMangaPreview(
+                  mangaId: 'manga-id-1',
+                  title: 'Digi Cat',
+                  description: 'A cat that digs.',
+                  thumbnailUrl: null,
+                  sourceLink: 'https://mangadex.org/manga/manga-id-1',
+                ),
+              ],
         ),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(find.text('MangaDex Home'), findsOneWidget);
-    expect(find.text('Latest Chapters'), findsOneWidget);
+    expect(find.text('Latest Updated Manga'), findsOneWidget);
     expect(find.text('Digi Cat'), findsOneWidget);
-    expect(find.text('Chapter 5 - 24 pages - en'), findsOneWidget);
+    expect(find.text('A cat that digs.'), findsOneWidget);
     expect(find.byTooltip('Refresh MangaDex Home'), findsOneWidget);
 
     resetKevDexTestState();
