@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -301,6 +302,24 @@ class StoryFetchResult {
     required this.images,
     required this.metadata,
     this.errorMessage,
+  });
+}
+
+class HitomiGalleryPreview {
+  final String galleryId;
+  final String title;
+  final String sourceLink;
+  final String thumbnailUrl;
+  final int pageCount;
+  final String? language;
+
+  const HitomiGalleryPreview({
+    required this.galleryId,
+    required this.title,
+    required this.sourceLink,
+    required this.thumbnailUrl,
+    required this.pageCount,
+    this.language,
   });
 }
 
@@ -1484,6 +1503,20 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openHitomiHome() {
+    if (!privateSourceSettingsNotifier.value.isAccepted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enable Private Sources first.')),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const HitomiHomePage()),
+    );
+  }
+
   void _showBackgroundPicker() {
     showModalBottomSheet<void>(
       context: context,
@@ -1525,6 +1558,7 @@ class _HomePageState extends State<HomePage> {
                       isOpening: isOpening,
                       onSelectSource: _selectSource,
                       onShowSourceHub: _showSourceHub,
+                      onOpenHitomiHome: _openHitomiHome,
                       onOpen: () => _openReader(selectedSourceType),
                       onClear: () {
                         final controller = _controllerForSource(
@@ -1532,11 +1566,20 @@ class _HomePageState extends State<HomePage> {
                         );
                         controller.clear();
 
-                        if (selectedSourceType ==
-                            StorySourceType.mangaDexChapter) {
-                          unawaited(KevDexMemory.saveLastMangaDexLink(''));
-                        } else {
-                          unawaited(KevDexMemory.saveLastDriveLink(''));
+                        switch (selectedSourceType) {
+                          case StorySourceType.mangaDexChapter:
+                            unawaited(KevDexMemory.saveLastMangaDexLink(''));
+                            break;
+                          case StorySourceType.nHentaiGallery:
+                            unawaited(KevDexMemory.saveLastNHentaiLink(''));
+                            break;
+                          case StorySourceType.hitomiGallery:
+                            unawaited(KevDexMemory.saveLastHitomiLink(''));
+                            break;
+                          case StorySourceType.driveFolder:
+                          case StorySourceType.singlePage:
+                            unawaited(KevDexMemory.saveLastDriveLink(''));
+                            break;
                         }
                       },
                     ),
@@ -1998,6 +2041,7 @@ class _SourceHubPanel extends StatelessWidget {
   final bool isOpening;
   final ValueChanged<StorySourceType> onSelectSource;
   final VoidCallback onShowSourceHub;
+  final VoidCallback onOpenHitomiHome;
   final VoidCallback onOpen;
   final VoidCallback onClear;
 
@@ -2010,6 +2054,7 @@ class _SourceHubPanel extends StatelessWidget {
     required this.isOpening,
     required this.onSelectSource,
     required this.onShowSourceHub,
+    required this.onOpenHitomiHome,
     required this.onOpen,
     required this.onClear,
   });
@@ -2119,6 +2164,25 @@ class _SourceHubPanel extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 14),
+          if (selectedSourceType == StorySourceType.hitomiGallery) ...[
+            Tooltip(
+              message: 'Open Hitomi Home',
+              child: OutlinedButton.icon(
+                onPressed: isOpening ? null : onOpenHitomiHome,
+                icon: const Icon(Icons.travel_explore_rounded),
+                label: const Text('Hitomi Home'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _primaryAccent,
+                  side: const BorderSide(color: Color(0xFF3C6F60)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           _SourceLinkField(
             label: selectedDefinition.label,
             hintText: selectedDefinition.hintText,
@@ -3145,6 +3209,338 @@ class _LibraryItemCard extends StatelessWidget {
                 icon: const Icon(Icons.close_rounded, size: 19),
                 color: _mutedText,
                 onPressed: onRemove,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class HitomiHomePage extends StatefulWidget {
+  final Future<List<HitomiGalleryPreview>> Function()? galleryLoader;
+
+  const HitomiHomePage({super.key, this.galleryLoader});
+
+  @override
+  State<HitomiHomePage> createState() => _HitomiHomePageState();
+}
+
+class _HitomiHomePageState extends State<HitomiHomePage> {
+  late Future<List<HitomiGalleryPreview>> galleriesFuture;
+  String? openingGalleryId;
+
+  @override
+  void initState() {
+    super.initState();
+    galleriesFuture = _loadGalleries();
+  }
+
+  Future<List<HitomiGalleryPreview>> _loadGalleries() {
+    final loader = widget.galleryLoader;
+
+    if (loader != null) {
+      return loader();
+    }
+
+    return fetchHitomiHomeGalleries();
+  }
+
+  void _refresh() {
+    setState(() {
+      galleriesFuture = _loadGalleries();
+    });
+  }
+
+  Future<void> _openGallery(HitomiGalleryPreview gallery) async {
+    if (openingGalleryId != null) {
+      return;
+    }
+
+    setState(() {
+      openingGalleryId = gallery.galleryId;
+    });
+
+    StoryFetchResult? result;
+    String? errorMessage;
+
+    try {
+      result = await fetchHitomiGallery(gallery.sourceLink);
+    } catch (_) {
+      errorMessage = 'Hitomi gallery could not be reached.';
+    } finally {
+      if (mounted) {
+        setState(() {
+          openingGalleryId = null;
+        });
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (result == null || result.images.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            errorMessage ??
+                result?.errorMessage ??
+                'Hitomi did not return readable pages.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    await KevDexMemory.saveLastLink(gallery.sourceLink);
+    await KevDexMemory.saveLastHitomiLink(gallery.sourceLink);
+
+    final progress = ReadingProgress(
+      sourceLink: gallery.sourceLink,
+      images: List<DriveImage>.unmodifiable(result.images),
+      pageIndex: 0,
+      metadata: result.metadata,
+    );
+
+    readingProgressNotifier.value = progress;
+    unawaited(KevDexMemory.saveReadingProgress(progress));
+
+    if (!mounted) {
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReaderPage(
+          link: gallery.sourceLink,
+          images: result!.images,
+          initialIndex: 0,
+          startInGallery: false,
+          metadata: result.metadata,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _KevDexBackground(
+        overlayOpacity: 0.86,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 10, 16, 12),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Back',
+                      icon: const Icon(Icons.arrow_back_rounded),
+                      color: Colors.white,
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                    const SizedBox(width: 4),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Hitomi Home',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'Recent Galleries',
+                            style: TextStyle(
+                              color: _mutedText,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh Hitomi Home',
+                      icon: const Icon(Icons.refresh_rounded),
+                      color: _primaryAccent,
+                      onPressed: _refresh,
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: FutureBuilder<List<HitomiGalleryPreview>>(
+                  future: galleriesFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const _MangaLoadingState();
+                    }
+
+                    if (snapshot.hasError) {
+                      return const _ReaderMessageState(
+                        icon: Icons.travel_explore_rounded,
+                        title: 'Hitomi Home could not load.',
+                        message: 'Refresh or check the network.',
+                      );
+                    }
+
+                    final galleries =
+                        snapshot.data ?? const <HitomiGalleryPreview>[];
+
+                    if (galleries.isEmpty) {
+                      return _ReaderMessageState(
+                        icon: Icons.travel_explore_rounded,
+                        title: kIsWeb
+                            ? 'Hitomi Home needs Android.'
+                            : 'No Hitomi galleries found.',
+                        message: kIsWeb
+                            ? 'Chrome preview blocks Hitomi list requests.'
+                            : 'Refresh or check the network.',
+                      );
+                    }
+
+                    return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      itemCount: galleries.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final gallery = galleries[index];
+
+                        return _HitomiGalleryCard(
+                          gallery: gallery,
+                          isOpening: openingGalleryId == gallery.galleryId,
+                          onOpen: () => _openGallery(gallery),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HitomiGalleryCard extends StatelessWidget {
+  final HitomiGalleryPreview gallery;
+  final bool isOpening;
+  final VoidCallback onOpen;
+
+  const _HitomiGalleryCard({
+    required this.gallery,
+    required this.isOpening,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final details = <String>[
+      'Gallery ${gallery.galleryId}',
+      '${gallery.pageCount} pages',
+      if (gallery.language != null) gallery.language!,
+    ].join(' - ');
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: isOpening ? null : onOpen,
+        borderRadius: BorderRadius.circular(8),
+        child: Ink(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: _glassSurfaceColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF2F2D39)),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  width: 64,
+                  height: 86,
+                  child: _PrivateThumbnailFrame(
+                    isPrivate: true,
+                    child: CachedNetworkImage(
+                      imageUrl: gallery.thumbnailUrl,
+                      httpHeaders: _readerImageRequestHeaders(
+                        gallery.thumbnailUrl,
+                      ),
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) =>
+                          const _ThumbnailPlaceholder(),
+                      errorWidget: (context, url, error) =>
+                          const _ThumbnailPlaceholder(),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      gallery.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      details,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _mutedText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    const Text(
+                      'Hitomi',
+                      style: TextStyle(
+                        color: _primaryAccent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: isOpening
+                    ? const CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: _primaryAccent,
+                      )
+                    : const Icon(
+                        Icons.arrow_forward_rounded,
+                        color: _primaryAccent,
+                      ),
               ),
             ],
           ),
@@ -4482,6 +4878,154 @@ StoryFetchResult parseNHentaiGalleryPayload(Object? payload, String galleryId) {
   );
 }
 
+Future<List<HitomiGalleryPreview>> fetchHitomiHomeGalleries({
+  int limit = 12,
+}) async {
+  if (kIsWeb) {
+    return const <HitomiGalleryPreview>[];
+  }
+
+  try {
+    final response = await http
+        .get(
+          Uri.https(_hitomiIndexHost, _hitomiIndexPath),
+          headers: {
+            ..._readerRequestHeaders('hitomi.la'),
+            'Range': 'bytes=0-4095',
+          },
+        )
+        .timeout(_privateSourceRequestTimeout);
+
+    if (response.statusCode != 200 && response.statusCode != 206) {
+      return const <HitomiGalleryPreview>[];
+    }
+
+    final galleryIds = parseHitomiNozomiIds(
+      response.bodyBytes,
+      limit: limit * 4,
+    );
+    final routing = await fetchHitomiRouting();
+    final previews = <HitomiGalleryPreview>[];
+
+    for (final galleryId in galleryIds) {
+      final preview = await fetchHitomiGalleryPreview(galleryId, routing);
+
+      if (preview == null) {
+        continue;
+      }
+
+      previews.add(preview);
+
+      if (previews.length >= limit) {
+        break;
+      }
+    }
+
+    return List<HitomiGalleryPreview>.unmodifiable(previews);
+  } catch (_) {
+    return const <HitomiGalleryPreview>[];
+  }
+}
+
+List<String> parseHitomiNozomiIds(List<int> bytes, {int limit = 40}) {
+  if (limit <= 0) {
+    return const <String>[];
+  }
+
+  final ids = <String>[];
+
+  for (var offset = 0; offset + 3 < bytes.length; offset += 4) {
+    final id =
+        (bytes[offset] << 24) |
+        (bytes[offset + 1] << 16) |
+        (bytes[offset + 2] << 8) |
+        bytes[offset + 3];
+
+    if (id > 0) {
+      ids.add(id.toString());
+    }
+
+    if (ids.length >= limit) {
+      break;
+    }
+  }
+
+  return List<String>.unmodifiable(ids);
+}
+
+Future<HitomiGalleryPreview?> fetchHitomiGalleryPreview(
+  String galleryId,
+  HitomiRouting routing,
+) async {
+  for (final host in _hitomiGalleryInfoHosts) {
+    try {
+      final response = await http
+          .get(
+            Uri.https(host, '/galleries/$galleryId.js'),
+            headers: _readerRequestHeaders('hitomi.la'),
+          )
+          .timeout(_privateSourceRequestTimeout);
+
+      if (response.statusCode != 200) {
+        continue;
+      }
+
+      final preview = parseHitomiGalleryPreview(
+        response.body,
+        galleryId,
+        routing: routing,
+      );
+
+      if (preview != null) {
+        return preview;
+      }
+    } catch (_) {}
+  }
+
+  return null;
+}
+
+HitomiGalleryPreview? parseHitomiGalleryPreview(
+  String script,
+  String galleryId, {
+  HitomiRouting routing = _fallbackHitomiRouting,
+}) {
+  final galleryInfo = _extractHitomiGalleryInfo(script);
+
+  if (galleryInfo == null) {
+    return null;
+  }
+
+  final files = galleryInfo['files'];
+
+  if (files is! List || files.isEmpty) {
+    return null;
+  }
+
+  final firstFile = files.first;
+
+  if (firstFile is! Map) {
+    return null;
+  }
+
+  final hash = _cleanString(firstFile['hash']);
+
+  if (hash == null) {
+    return null;
+  }
+
+  return HitomiGalleryPreview(
+    galleryId: galleryId,
+    title: _cleanString(galleryInfo['title']) ?? 'Hitomi $galleryId',
+    sourceLink: 'https://hitomi.la/reader/$galleryId.html',
+    thumbnailUrl: _hitomiWebpImageUrl(hash, routing),
+    pageCount: files.whereType<Map>().length,
+    language:
+        _cleanString(galleryInfo['language_localname']) ??
+        _cleanString(galleryInfo['language']),
+  );
+}
+
 Future<StoryFetchResult> fetchHitomiGallery(String link) async {
   final galleryId = extractHitomiGalleryId(link);
   final fallback = StoryFetchResult(
@@ -4505,10 +5049,12 @@ Future<StoryFetchResult> fetchHitomiGallery(String link) async {
 
   for (final host in _hitomiGalleryInfoHosts) {
     try {
-      final response = await http.get(
-        Uri.https(host, '/galleries/$galleryId.js'),
-        headers: _readerRequestHeaders('hitomi.la'),
-      );
+      final response = await http
+          .get(
+            Uri.https(host, '/galleries/$galleryId.js'),
+            headers: _readerRequestHeaders('hitomi.la'),
+          )
+          .timeout(_privateSourceRequestTimeout);
 
       if (response.statusCode != 200) {
         lastErrorMessage =
@@ -4614,10 +5160,12 @@ List<String> _nHentaiCandidateHosts(String link) {
 }
 
 const List<String> _hitomiGalleryInfoHosts = <String>[
-  'ltn.hitomi.la',
   'ltn.gold-usergeneratedcontent.net',
+  'ltn.hitomi.la',
 ];
 
+const String _hitomiIndexHost = 'ltn.gold-usergeneratedcontent.net';
+const String _hitomiIndexPath = '/index-all.nozomi';
 const String _hitomiImageHost = 'a.gold-usergeneratedcontent.net';
 const Duration _privateSourceRequestTimeout = Duration(seconds: 18);
 const HitomiRouting _fallbackHitomiRouting = HitomiRouting(
@@ -4655,10 +5203,12 @@ class HitomiRouting {
 Future<HitomiRouting> fetchHitomiRouting() async {
   for (final host in _hitomiGalleryInfoHosts) {
     try {
-      final response = await http.get(
-        Uri.https(host, '/gg.js'),
-        headers: _readerRequestHeaders('hitomi.la'),
-      );
+      final response = await http
+          .get(
+            Uri.https(host, '/gg.js'),
+            headers: _readerRequestHeaders('hitomi.la'),
+          )
+          .timeout(_privateSourceRequestTimeout);
 
       if (response.statusCode != 200) {
         continue;
@@ -4715,6 +5265,10 @@ String _hitomiWebpImageUrl(String hash, HitomiRouting routing) {
 }
 
 Map<String, String> _readerRequestHeaders(String host) {
+  if (kIsWeb) {
+    return {'Accept': 'application/json,text/html;q=0.9,*/*;q=0.8'};
+  }
+
   return {
     'Accept': 'application/json,text/html;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
@@ -4761,6 +5315,10 @@ String _nHentaiConnectionMessage(String host, Object error) {
 }
 
 Map<String, String>? _readerImageRequestHeaders(String url) {
+  if (kIsWeb) {
+    return null;
+  }
+
   final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
 
   if (host.contains('hitomi') || host.contains('gold-usergeneratedcontent')) {

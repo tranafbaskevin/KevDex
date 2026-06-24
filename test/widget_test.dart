@@ -95,6 +95,43 @@ void main() {
     );
   });
 
+  test('Hitomi home index bytes become gallery ids', () {
+    expect(
+      parseHitomiNozomiIds([0, 0, 0, 1, 0, 0, 15, 160], limit: 4),
+      const <String>['1', '4000'],
+    );
+    expect(parseHitomiNozomiIds([0, 0, 0, 1], limit: 0), isEmpty);
+  });
+
+  test('Hitomi home preview parses gallery cards', () {
+    const script =
+        'var galleryinfo = {"id":"7654321","title":"Hitomi Sample",'
+        '"language_localname":"English",'
+        '"files":[{"name":"001.jpg","hash":"abcdef123456","haswebp":1},'
+        '{"name":"002.png","hash":"001122334455"}]};';
+    const routingScript =
+        "gg = { m:function(g){var o=1;switch(g){case 1605:o=0;break;}"
+        "return o;},s:function(h){return 'unused';},b:'1782259201/'};";
+    final routing = parseHitomiRoutingScript(routingScript);
+
+    final preview = parseHitomiGalleryPreview(
+      script,
+      '7654321',
+      routing: routing,
+    );
+
+    expect(preview, isNotNull);
+    expect(preview!.galleryId, '7654321');
+    expect(preview.title, 'Hitomi Sample');
+    expect(preview.language, 'English');
+    expect(preview.pageCount, 2);
+    expect(preview.sourceLink, 'https://hitomi.la/reader/7654321.html');
+    expect(
+      preview.thumbnailUrl,
+      'https://w1.gold-usergeneratedcontent.net/1782259201/1605/abcdef123456.webp',
+    );
+  });
+
   test('Hitomi legacy image hosts migrate from saved cache', () {
     final image = DriveImage.fromJson({
       'thumbnailUrl': 'https://a.hitomi.la/webp/6/45/abcdef123456.webp',
@@ -210,6 +247,13 @@ void main() {
     expect(find.byTooltip('Open NHentai'), findsOneWidget);
     expect(find.text('NHentai opens through Private Sources.'), findsOneWidget);
     expect(find.text('Paste NHentai gallery link'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Hitomi'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Open Hitomi Home'), findsOneWidget);
+    expect(find.byTooltip('Open Hitomi'), findsOneWidget);
+    expect(find.text('Paste Hitomi gallery link'), findsOneWidget);
 
     resetKevDexTestState();
   });
