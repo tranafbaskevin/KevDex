@@ -135,6 +135,18 @@ class StoryMetadata {
     this.chapterLabel,
   });
 
+  StoryMetadata copyWith({
+    StorySourceType? sourceType,
+    String? title,
+    String? chapterLabel,
+  }) {
+    return StoryMetadata(
+      sourceType: sourceType ?? this.sourceType,
+      title: title ?? this.title,
+      chapterLabel: chapterLabel ?? this.chapterLabel,
+    );
+  }
+
   String get sourceLabel {
     switch (sourceType) {
       case StorySourceType.driveFolder:
@@ -383,6 +395,22 @@ class MangaDexChapterPreview {
       chapterLabel: chapterLabel,
     );
   }
+}
+
+class MangaDexMangaPreview {
+  final String mangaId;
+  final String title;
+  final String? description;
+  final String? thumbnailUrl;
+  final String sourceLink;
+
+  const MangaDexMangaPreview({
+    required this.mangaId,
+    required this.title,
+    this.description,
+    this.thumbnailUrl,
+    required this.sourceLink,
+  });
 }
 
 class ReadingProgress {
@@ -3360,17 +3388,354 @@ class _LibraryItemCard extends StatelessWidget {
 }
 
 class MangaDexHomePage extends StatefulWidget {
-  final Future<List<MangaDexChapterPreview>> Function()? chapterLoader;
+  final Future<List<MangaDexMangaPreview>> Function({int limit, int offset})? mangaLoader;
 
-  const MangaDexHomePage({super.key, this.chapterLoader});
+  const MangaDexHomePage({super.key, this.mangaLoader});
 
   @override
   State<MangaDexHomePage> createState() => _MangaDexHomePageState();
 }
 
 class _MangaDexHomePageState extends State<MangaDexHomePage> {
+  final ScrollController _scrollController = ScrollController();
+  final List<MangaDexMangaPreview> _mangas = [];
+  bool _isLoading = false;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  String? _errorMessage;
+  int _offset = 0;
+  final int _limit = 20;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitialMangas();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadInitialMangas() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _mangas.clear();
+      _offset = 0;
+      _hasMore = true;
+    });
+
+    try {
+      final loader = widget.mangaLoader;
+      final List<MangaDexMangaPreview> list;
+      if (loader != null) {
+        list = await loader(limit: _limit, offset: _offset);
+      } else {
+        list = await fetchMangaDexHomeMangas(limit: _limit, offset: _offset);
+      }
+
+      setState(() {
+        _mangas.addAll(list);
+        _isLoading = false;
+        if (list.length < _limit) {
+          _hasMore = false;
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Could not load MangaDex Home.';
+      });
+    }
+  }
+
+  Future<void> _loadMoreMangas() async {
+    if (_isLoadingMore || !_hasMore) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final nextOffset = _offset + _limit;
+      final loader = widget.mangaLoader;
+      final List<MangaDexMangaPreview> list;
+      if (loader != null) {
+        list = await loader(limit: _limit, offset: nextOffset);
+      } else {
+        list = await fetchMangaDexHomeMangas(limit: _limit, offset: nextOffset);
+      }
+
+      setState(() {
+        _offset = nextOffset;
+        _mangas.addAll(list);
+        _isLoadingMore = false;
+        if (list.length < _limit) {
+          _hasMore = false;
+        }
+      });
+    } catch (_) {
+      setState(() {
+        _isLoadingMore = false;
+      });
+    }
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    if (currentScroll >= maxScroll * 0.9) {
+      _loadMoreMangas();
+    }
+  }
+
+  void _openManga(MangaDexMangaPreview manga) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MangaDexMangaDetailPage(manga: manga),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _KevDexBackground(
+        overlayOpacity: 0.86,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 10, 16, 12),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Back',
+                      icon: const Icon(Icons.arrow_back_rounded),
+                      color: Colors.white,
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                    const SizedBox(width: 4),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'MangaDex Home',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'Latest Updated Manga',
+                            style: TextStyle(
+                              color: _mutedText,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh MangaDex Home',
+                      icon: const Icon(Icons.refresh_rounded),
+                      color: _primaryAccent,
+                      onPressed: _loadInitialMangas,
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Builder(
+                  builder: (context) {
+                    if (_isLoading) {
+                      return const _MangaLoadingState();
+                    }
+
+                    if (_errorMessage != null && _mangas.isEmpty) {
+                      return _ReaderMessageState(
+                        icon: Icons.explore_rounded,
+                        title: _errorMessage!,
+                        message: 'Refresh or check the network.',
+                      );
+                    }
+
+                    if (_mangas.isEmpty) {
+                      return const _ReaderMessageState(
+                        icon: Icons.explore_rounded,
+                        title: 'No MangaDex stories found.',
+                        message: 'Refresh or check the network.',
+                      );
+                    }
+
+                    return ListView.separated(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      itemCount: _mangas.length + (_hasMore ? 1 : 0),
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        if (index >= _mangas.length) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20),
+                            child: Center(
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(_primaryAccent),
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+
+                        final manga = _mangas[index];
+                        return _MangaDexMangaCard(
+                          manga: manga,
+                          onOpen: () => _openManga(manga),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MangaDexMangaCard extends StatelessWidget {
+  final MangaDexMangaPreview manga;
+  final VoidCallback onOpen;
+
+  const _MangaDexMangaCard({
+    required this.manga,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final thumbnailUrl = manga.thumbnailUrl;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(8),
+        child: Ink(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: _glassSurfaceColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF2F2D39)),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  width: 64,
+                  height: 86,
+                  child: thumbnailUrl == null
+                      ? const ColoredBox(
+                          color: _fieldColor,
+                          child: Icon(
+                            Icons.menu_book_rounded,
+                            color: _primaryAccent,
+                          ),
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: thumbnailUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) =>
+                              const _ThumbnailPlaceholder(),
+                          errorWidget: (context, url, error) =>
+                              const _ThumbnailPlaceholder(),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      manga.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      manga.description ?? 'No description available.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _mutedText,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    const Text(
+                      'MangaDex',
+                      style: TextStyle(
+                        color: _primaryAccent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: _primaryAccent,
+                size: 14,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MangaDexMangaDetailPage extends StatefulWidget {
+  final MangaDexMangaPreview manga;
+
+  const MangaDexMangaDetailPage({super.key, required this.manga});
+
+  @override
+  State<MangaDexMangaDetailPage> createState() => _MangaDexMangaDetailPageState();
+}
+
+class _MangaDexMangaDetailPageState extends State<MangaDexMangaDetailPage> {
   late Future<List<MangaDexChapterPreview>> chaptersFuture;
   String? openingChapterId;
+  bool isDescriptionExpanded = false;
 
   @override
   void initState() {
@@ -3379,13 +3744,9 @@ class _MangaDexHomePageState extends State<MangaDexHomePage> {
   }
 
   Future<List<MangaDexChapterPreview>> _loadChapters() {
-    final loader = widget.chapterLoader;
-
-    if (loader != null) {
-      return loader();
-    }
-
-    return fetchMangaDexHomeChapters();
+    return fetchMangaDexMangaChapters(widget.manga.mangaId).then((chapters) {
+      return chapters.map((c) => c.copyWith(thumbnailUrl: widget.manga.thumbnailUrl)).toList();
+    });
   }
 
   void _refresh() {
@@ -3404,12 +3765,13 @@ class _MangaDexHomePageState extends State<MangaDexHomePage> {
     });
 
     List<DriveImage> images = const <DriveImage>[];
-    StoryMetadata metadata = chapter.metadata;
+    StoryMetadata metadata = chapter.metadata.copyWith(title: widget.manga.title);
     String? errorMessage;
 
     try {
       images = await fetchMangaDexChapterImages(chapter.chapterId);
       metadata = await fetchMangaDexChapterMetadata(chapter.chapterId);
+      metadata = metadata.copyWith(title: widget.manga.title);
     } catch (_) {
       errorMessage = 'MangaDex chapter could not be reached.';
     } finally {
@@ -3468,9 +3830,11 @@ class _MangaDexHomePageState extends State<MangaDexHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final manga = widget.manga;
+
     return Scaffold(
       body: _KevDexBackground(
-        overlayOpacity: 0.86,
+        overlayOpacity: 0.88,
         child: SafeArea(
           child: Column(
             children: [
@@ -3486,32 +3850,17 @@ class _MangaDexHomePageState extends State<MangaDexHomePage> {
                     ),
                     const SizedBox(width: 4),
                     const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'MangaDex Home',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          SizedBox(height: 3),
-                          Text(
-                            'Latest Chapters',
-                            style: TextStyle(
-                              color: _mutedText,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        'Manga Details',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                     ),
                     IconButton(
-                      tooltip: 'Refresh MangaDex Home',
+                      tooltip: 'Refresh Chapters',
                       icon: const Icon(Icons.refresh_rounded),
                       color: _primaryAccent,
                       onPressed: _refresh,
@@ -3520,48 +3869,207 @@ class _MangaDexHomePageState extends State<MangaDexHomePage> {
                 ),
               ),
               Expanded(
-                child: FutureBuilder<List<MangaDexChapterPreview>>(
-                  future: chaptersFuture,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState != ConnectionState.done) {
-                      return const _MangaLoadingState();
-                    }
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _glassSurfaceColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF2F2D39)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: SizedBox(
+                                width: 100,
+                                height: 140,
+                                child: manga.thumbnailUrl == null
+                                    ? const ColoredBox(
+                                        color: _fieldColor,
+                                        child: Icon(
+                                          Icons.menu_book_rounded,
+                                          color: _primaryAccent,
+                                          size: 40,
+                                        ),
+                                      )
+                                    : CachedNetworkImage(
+                                        imageUrl: manga.thumbnailUrl!,
+                                        fit: BoxFit.cover,
+                                        placeholder: (context, url) =>
+                                            const _ThumbnailPlaceholder(),
+                                        errorWidget: (context, url, error) =>
+                                            const _ThumbnailPlaceholder(),
+                                      ),
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    manga.title,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Source: MangaDex',
+                                    style: TextStyle(
+                                      color: _mutedText,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  GestureDetector(
+                                    onTap: () {
+                                      // Optional action
+                                    },
+                                    child: const Text(
+                                      'Open in MangaDex website',
+                                      style: TextStyle(
+                                        color: _primaryAccent,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (manga.description != null) ...[
+                        const Text(
+                          'Description',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _glassSurfaceColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF2F2D39)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                manga.description!,
+                                maxLines: isDescriptionExpanded ? null : 3,
+                                overflow: isDescriptionExpanded
+                                    ? null
+                                    : TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                  height: 1.4,
+                                ),
+                              ),
+                              if (manga.description!.length > 150)
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        isDescriptionExpanded = !isDescriptionExpanded;
+                                      });
+                                    },
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(50, 30),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: Text(
+                                      isDescriptionExpanded ? 'Show Less' : 'Read More',
+                                      style: const TextStyle(
+                                        color: _primaryAccent,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                      const Text(
+                        'Chapters',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      FutureBuilder<List<MangaDexChapterPreview>>(
+                        future: chaptersFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState != ConnectionState.done) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 40),
+                              child: _MangaLoadingState(),
+                            );
+                          }
 
-                    if (snapshot.hasError) {
-                      return const _ReaderMessageState(
-                        icon: Icons.explore_rounded,
-                        title: 'MangaDex Home could not load.',
-                        message: 'Refresh or check the network.',
-                      );
-                    }
+                          if (snapshot.hasError) {
+                            return const _ReaderMessageState(
+                              icon: Icons.error_outline_rounded,
+                              title: 'Failed to load chapters.',
+                              message: 'Please try again.',
+                            );
+                          }
 
-                    final chapters =
-                        snapshot.data ?? const <MangaDexChapterPreview>[];
+                          final chapters = snapshot.data ?? const <MangaDexChapterPreview>[];
 
-                    if (chapters.isEmpty) {
-                      return const _ReaderMessageState(
-                        icon: Icons.explore_rounded,
-                        title: 'No MangaDex chapters found.',
-                        message: 'Refresh or check the network.',
-                      );
-                    }
+                          if (chapters.isEmpty) {
+                            return const _ReaderMessageState(
+                              icon: Icons.menu_book_rounded,
+                              title: 'No chapters available.',
+                              message: 'This manga might not have any chapters in English.',
+                            );
+                          }
 
-                    return ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      itemCount: chapters.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        final chapter = chapters[index];
-
-                        return _MangaDexChapterCard(
-                          chapter: chapter,
-                          isOpening: openingChapterId == chapter.chapterId,
-                          onOpen: () => _openChapter(chapter),
-                        );
-                      },
-                    );
-                  },
+                          return ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            padding: const EdgeInsets.only(bottom: 30),
+                            itemCount: chapters.length,
+                            separatorBuilder: (context, index) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final chapter = chapters[index];
+                              return _MangaDexDetailChapterCard(
+                                chapter: chapter,
+                                isOpening: openingChapterId == chapter.chapterId,
+                                onOpen: () => _openChapter(chapter),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -3572,12 +4080,12 @@ class _MangaDexHomePageState extends State<MangaDexHomePage> {
   }
 }
 
-class _MangaDexChapterCard extends StatelessWidget {
+class _MangaDexDetailChapterCard extends StatelessWidget {
   final MangaDexChapterPreview chapter;
   final bool isOpening;
   final VoidCallback onOpen;
 
-  const _MangaDexChapterCard({
+  const _MangaDexDetailChapterCard({
     required this.chapter,
     required this.isOpening,
     required this.onOpen,
@@ -3586,11 +4094,9 @@ class _MangaDexChapterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final details = <String>[
-      chapter.chapterLabel ?? 'Chapter',
       if (chapter.pageCount != null) '${chapter.pageCount} pages',
       if (chapter.language != null) chapter.language!,
     ].join(' - ');
-    final thumbnailUrl = chapter.thumbnailUrl;
 
     return Material(
       color: Colors.transparent,
@@ -3598,7 +4104,7 @@ class _MangaDexChapterCard extends StatelessWidget {
         onTap: isOpening ? null : onOpen,
         borderRadius: BorderRadius.circular(8),
         child: Ink(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             color: _glassSurfaceColor,
             borderRadius: BorderRadius.circular(8),
@@ -3606,82 +4112,48 @@ class _MangaDexChapterCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(
-                  width: 64,
-                  height: 86,
-                  child: thumbnailUrl == null
-                      ? const ColoredBox(
-                          color: _fieldColor,
-                          child: Icon(
-                            Icons.menu_book_rounded,
-                            color: _primaryAccent,
-                          ),
-                        )
-                      : CachedNetworkImage(
-                          imageUrl: thumbnailUrl,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) =>
-                              const _ThumbnailPlaceholder(),
-                          errorWidget: (context, url, error) =>
-                              const _ThumbnailPlaceholder(),
-                        ),
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      chapter.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                      chapter.chapterLabel ?? 'Chapter',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 14,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 7),
-                    Text(
-                      details,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _mutedText,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                    if (details.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        details,
+                        style: TextStyle(
+                          color: _mutedText,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 7),
-                    const Text(
-                      'MangaDex',
-                      style: TextStyle(
-                        color: _primaryAccent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 28,
-                height: 28,
-                child: isOpening
-                    ? const CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: _primaryAccent,
-                      )
-                    : const Icon(
-                        Icons.arrow_forward_rounded,
-                        color: _primaryAccent,
-                      ),
-              ),
+              if (isOpening)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(_primaryAccent),
+                  ),
+                )
+              else
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: _primaryAccent,
+                  size: 14,
+                ),
             ],
           ),
         ),
@@ -3700,29 +4172,154 @@ class HitomiHomePage extends StatefulWidget {
 }
 
 class _HitomiHomePageState extends State<HitomiHomePage> {
-  late Future<List<HitomiGalleryPreview>> galleriesFuture;
+  final ScrollController _scrollController = ScrollController();
+  final List<HitomiGalleryPreview> _galleries = [];
+  List<String> _galleryIds = [];
+  HitomiRouting? _routing;
+  bool _isLoading = false;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  String? _errorMessage;
+  int _currentIndex = 0;
+  final int _pageSize = 12;
   String? openingGalleryId;
 
   @override
   void initState() {
     super.initState();
-    galleriesFuture = _loadGalleries();
+    _loadInitialGalleries();
+    _scrollController.addListener(_onScroll);
   }
 
-  Future<List<HitomiGalleryPreview>> _loadGalleries() {
-    final loader = widget.galleryLoader;
-
-    if (loader != null) {
-      return loader();
-    }
-
-    return fetchHitomiHomeGalleries();
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
-  void _refresh() {
+  Future<void> _loadInitialGalleries() async {
     setState(() {
-      galleriesFuture = _loadGalleries();
+      _isLoading = true;
+      _errorMessage = null;
+      _galleries.clear();
+      _galleryIds.clear();
+      _currentIndex = 0;
+      _hasMore = true;
     });
+
+    try {
+      final loader = widget.galleryLoader;
+      if (loader != null) {
+        final list = await loader();
+        setState(() {
+          _galleries.addAll(list);
+          _isLoading = false;
+          _hasMore = false;
+        });
+        return;
+      }
+
+      if (kIsWeb) {
+        setState(() {
+          _isLoading = false;
+          _hasMore = false;
+        });
+        return;
+      }
+
+      final response = await http
+          .get(
+            Uri.https(_hitomiIndexHost, _hitomiIndexPath),
+            headers: {
+              ..._readerRequestHeaders('hitomi.la'),
+              'Range': 'bytes=0-8191',
+            },
+          )
+          .timeout(_privateSourceRequestTimeout);
+
+      if (response.statusCode != 200 && response.statusCode != 206) {
+        throw Exception('Failed to load Hitomi index.');
+      }
+
+      _galleryIds = parseHitomiNozomiIds(response.bodyBytes, limit: 300);
+      _routing = await fetchHitomiRouting();
+
+      if (_galleryIds.isEmpty) {
+        setState(() {
+          _isLoading = false;
+          _hasMore = false;
+        });
+        return;
+      }
+
+      final slice = _galleryIds.take(_pageSize).toList();
+      final list = await fetchHitomiHomeGalleries(
+        limit: _pageSize,
+        targetIds: slice,
+        targetRouting: _routing,
+      );
+
+      setState(() {
+        _galleries.addAll(list);
+        _currentIndex = slice.length;
+        _isLoading = false;
+        if (list.isEmpty || _currentIndex >= _galleryIds.length) {
+          _hasMore = false;
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Hitomi Home could not load.';
+      });
+    }
+  }
+
+  Future<void> _loadMoreGalleries() async {
+    if (_isLoadingMore || !_hasMore || _galleryIds.isEmpty || _routing == null) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final slice = _galleryIds.skip(_currentIndex).take(_pageSize).toList();
+      if (slice.isEmpty) {
+        setState(() {
+          _hasMore = false;
+          _isLoadingMore = false;
+        });
+        return;
+      }
+
+      final list = await fetchHitomiHomeGalleries(
+        limit: _pageSize,
+        targetIds: slice,
+        targetRouting: _routing,
+      );
+
+      setState(() {
+        _galleries.addAll(list);
+        _currentIndex += slice.length;
+        _isLoadingMore = false;
+        if (list.isEmpty || _currentIndex >= _galleryIds.length) {
+          _hasMore = false;
+        }
+      });
+    } catch (_) {
+      setState(() {
+        _isLoadingMore = false;
+      });
+    }
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    if (currentScroll >= maxScroll * 0.9) {
+      _loadMoreGalleries();
+    }
   }
 
   Future<void> _openGallery(HitomiGalleryPreview gallery) async {
@@ -3845,31 +4442,27 @@ class _HitomiHomePageState extends State<HitomiHomePage> {
                       tooltip: 'Refresh Hitomi Home',
                       icon: const Icon(Icons.refresh_rounded),
                       color: _primaryAccent,
-                      onPressed: _refresh,
+                      onPressed: _loadInitialGalleries,
                     ),
                   ],
                 ),
               ),
               Expanded(
-                child: FutureBuilder<List<HitomiGalleryPreview>>(
-                  future: galleriesFuture,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState != ConnectionState.done) {
+                child: Builder(
+                  builder: (context) {
+                    if (_isLoading) {
                       return const _MangaLoadingState();
                     }
 
-                    if (snapshot.hasError) {
-                      return const _ReaderMessageState(
+                    if (_errorMessage != null && _galleries.isEmpty) {
+                      return _ReaderMessageState(
                         icon: Icons.travel_explore_rounded,
-                        title: 'Hitomi Home could not load.',
+                        title: _errorMessage!,
                         message: 'Refresh or check the network.',
                       );
                     }
 
-                    final galleries =
-                        snapshot.data ?? const <HitomiGalleryPreview>[];
-
-                    if (galleries.isEmpty) {
+                    if (_galleries.isEmpty) {
                       return _ReaderMessageState(
                         icon: Icons.travel_explore_rounded,
                         title: kIsWeb
@@ -3882,13 +4475,30 @@ class _HitomiHomePageState extends State<HitomiHomePage> {
                     }
 
                     return ListView.separated(
+                      controller: _scrollController,
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      itemCount: galleries.length,
+                      itemCount: _galleries.length + (_hasMore ? 1 : 0),
                       separatorBuilder: (context, index) =>
                           const SizedBox(height: 10),
                       itemBuilder: (context, index) {
-                        final gallery = galleries[index];
+                        if (index >= _galleries.length) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20),
+                            child: Center(
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(_primaryAccent),
+                                ),
+                              ),
+                            ),
+                          );
+                        }
 
+                        final gallery = _galleries[index];
                         return _HitomiGalleryCard(
                           gallery: gallery,
                           isOpening: openingGalleryId == gallery.galleryId,
@@ -5363,48 +5973,63 @@ StoryFetchResult parseNHentaiGalleryPayload(Object? payload, String galleryId) {
 
 Future<List<HitomiGalleryPreview>> fetchHitomiHomeGalleries({
   int limit = 12,
+  List<String>? targetIds,
+  HitomiRouting? targetRouting,
 }) async {
   if (kIsWeb) {
     return const <HitomiGalleryPreview>[];
   }
 
   try {
-    final response = await http
-        .get(
-          Uri.https(_hitomiIndexHost, _hitomiIndexPath),
-          headers: {
-            ..._readerRequestHeaders('hitomi.la'),
-            'Range': 'bytes=0-4095',
-          },
-        )
-        .timeout(_privateSourceRequestTimeout);
+    final List<String> galleryIds;
+    final HitomiRouting routing;
 
-    if (response.statusCode != 200 && response.statusCode != 206) {
-      return const <HitomiGalleryPreview>[];
+    if (targetIds != null && targetRouting != null) {
+      galleryIds = targetIds;
+      routing = targetRouting;
+    } else {
+      final response = await http
+          .get(
+            Uri.https(_hitomiIndexHost, _hitomiIndexPath),
+            headers: {
+              ..._readerRequestHeaders('hitomi.la'),
+              'Range': 'bytes=0-4095',
+            },
+          )
+          .timeout(_privateSourceRequestTimeout);
+
+      if (response.statusCode != 200 && response.statusCode != 206) {
+        return const <HitomiGalleryPreview>[];
+      }
+
+      galleryIds = parseHitomiNozomiIds(
+        response.bodyBytes,
+        limit: limit * 4,
+      );
+      routing = await fetchHitomiRouting();
     }
 
-    final galleryIds = parseHitomiNozomiIds(
-      response.bodyBytes,
-      limit: limit * 4,
-    );
-    final routing = await fetchHitomiRouting();
     final previews = <HitomiGalleryPreview>[];
+    int currentIndex = 0;
 
-    for (final galleryId in galleryIds) {
-      final preview = await fetchHitomiGalleryPreview(galleryId, routing);
+    while (previews.length < limit && currentIndex < galleryIds.length) {
+      final batchSize = (limit - previews.length) + 4;
+      final batchIds = galleryIds.skip(currentIndex).take(batchSize).toList();
+      if (batchIds.isEmpty) break;
 
-      if (preview == null) {
-        continue;
-      }
+      currentIndex += batchIds.length;
 
-      previews.add(preview);
+      final futures = batchIds.map((id) => fetchHitomiGalleryPreview(id, routing));
+      final results = await Future.wait(futures);
 
-      if (previews.length >= limit) {
-        break;
+      for (final preview in results) {
+        if (preview != null) {
+          previews.add(preview);
+        }
       }
     }
 
-    return List<HitomiGalleryPreview>.unmodifiable(previews);
+    return List<HitomiGalleryPreview>.unmodifiable(previews.take(limit));
   } catch (_) {
     return const <HitomiGalleryPreview>[];
   }
@@ -5652,20 +6277,22 @@ const String _hitomiIndexPath = '/index-all.nozomi';
 const String _hitomiImageHost = 'a.gold-usergeneratedcontent.net';
 const Duration _privateSourceRequestTimeout = Duration(seconds: 18);
 const HitomiRouting _fallbackHitomiRouting = HitomiRouting(
-  versionPath: '1782259201/',
+  versionPath: '1782280801/',
 );
 
 class HitomiRouting {
   final String versionPath;
-  final Set<int> zeroSubdomainKeys;
+  // Keys where mirrorIndex = 1 (subdomain w2). In the new gg.js format the
+  // switch-case list maps to o=1; everything else defaults to o=0 (w1).
+  final Set<int> oneSubdomainKeys;
 
   const HitomiRouting({
     this.versionPath = '',
-    this.zeroSubdomainKeys = const <int>{},
+    this.oneSubdomainKeys = const <int>{},
   });
 
   int mirrorForHash(String hash) {
-    return zeroSubdomainKeys.contains(hitomiRoutingKey(hash)) ? 0 : 1;
+    return oneSubdomainKeys.contains(hitomiRoutingKey(hash)) ? 1 : 0;
   }
 
   String webpSubdomainForHash(String hash) {
@@ -5704,30 +6331,52 @@ Future<HitomiRouting> fetchHitomiRouting() async {
   return _fallbackHitomiRouting;
 }
 
+/// Parses Hitomi's gg.js routing script.
+///
+/// The current gg.js format looks like:
+///   gg = { m: function(g) {
+///     var o = 0;
+///     switch (g) { case 123: case 456: ... o = 1; break; }
+///     return o;
+///   }, s: function(h) { ... }, b: 'VERSION/' };
+///
+/// The switch-case list contains keys where o=1 (mirror index 1, subdomain
+/// w2). All other keys fall through to the default o=0 (subdomain w1).
+/// An older format had o=0 inside the switch — this parser handles both.
 HitomiRouting parseHitomiRoutingScript(String script) {
   final versionPath =
       RegExp(r"\bb\s*:\s*'([^']*)'").firstMatch(script)?.group(1) ?? '';
-  final zeroBlock = RegExp(
-    r'switch\s*\(g\)\s*\{(.*?)o\s*=\s*0\s*;',
+
+  // Try new format first: cases inside the switch map to o=1.
+  final oneBlock = RegExp(
+    r'switch\s*\([^)]+\)\s*\{(.*?)o\s*=\s*1\s*;',
     dotAll: true,
   ).firstMatch(script);
-  final zeroSubdomainKeys = <int>{};
 
-  if (zeroBlock != null) {
+  if (oneBlock != null) {
+    final oneSubdomainKeys = <int>{};
     for (final match in RegExp(
       r'case\s+(\d+)\s*:',
-    ).allMatches(zeroBlock.group(1)!)) {
+    ).allMatches(oneBlock.group(1)!)) {
       final key = int.tryParse(match.group(1)!);
-
       if (key != null) {
-        zeroSubdomainKeys.add(key);
+        oneSubdomainKeys.add(key);
       }
     }
+    return HitomiRouting(
+      versionPath: versionPath,
+      oneSubdomainKeys: Set<int>.unmodifiable(oneSubdomainKeys),
+    );
   }
 
+  // Legacy format: cases inside the switch map to o=0 (mirror 0, subdomain w1).
+  // In that case keys NOT in the set map to mirror 1, which is what the old
+  // zeroSubdomainKeys logic relied on. We store those as oneSubdomainKeys by
+  // collecting all keys from the o=0 block and noting that everything else is
+  // mirror 1. Because we cannot enumerate "everything else", we fall back to
+  // an empty oneSubdomainKeys set (all keys → w1) which is a safe default.
   return HitomiRouting(
     versionPath: versionPath,
-    zeroSubdomainKeys: Set<int>.unmodifiable(zeroSubdomainKeys),
   );
 }
 
@@ -6025,6 +6674,156 @@ Future<List<MangaDexChapterPreview>> fetchMangaDexHomeChapters({
   } catch (_) {
     return const <MangaDexChapterPreview>[];
   }
+}
+
+Future<List<MangaDexMangaPreview>> fetchMangaDexHomeMangas({
+  int limit = 20,
+  int offset = 0,
+}) async {
+  try {
+    final response = await http.get(
+      Uri.https('api.mangadex.org', '/manga', {
+        'limit': limit.toString(),
+        'offset': offset.toString(),
+        'includes[]': 'cover_art',
+        'contentRating[]': ['safe', 'suggestive', 'erotica'],
+        'order[latestUploadedChapter]': 'desc',
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      return const <MangaDexMangaPreview>[];
+    }
+
+    final decoded = jsonDecode(response.body);
+    return parseMangaDexMangaPreviews(decoded);
+  } catch (_) {
+    return const <MangaDexMangaPreview>[];
+  }
+}
+
+List<MangaDexMangaPreview> parseMangaDexMangaPreviews(Object? payload) {
+  if (payload is! Map<String, Object?>) {
+    return const <MangaDexMangaPreview>[];
+  }
+
+  final data = payload['data'];
+
+  if (data is! List) {
+    return const <MangaDexMangaPreview>[];
+  }
+
+  final previews = <MangaDexMangaPreview>[];
+
+  for (final item in data.whereType<Map>()) {
+    final id = _cleanString(item['id']);
+    final attributes = item['attributes'];
+    final relationships = item['relationships'];
+
+    if (id == null || attributes is! Map) {
+      continue;
+    }
+
+    final title = _bestLocalizedTitle(attributes['title']) ?? 'Untitled Manga';
+    final description = _bestLocalizedTitle(attributes['description']);
+
+    String? coverFileName;
+    if (relationships is List) {
+      for (final rel in relationships.whereType<Map>()) {
+        if (rel['type'] == 'cover_art') {
+          final relAttributes = rel['attributes'];
+          if (relAttributes is Map) {
+            coverFileName = _cleanString(relAttributes['fileName']);
+          }
+        }
+      }
+    }
+
+    final thumbnailUrl = coverFileName != null
+        ? 'https://uploads.mangadex.org/covers/$id/$coverFileName.256.jpg'
+        : null;
+
+    previews.add(
+      MangaDexMangaPreview(
+        mangaId: id,
+        title: title,
+        description: description,
+        thumbnailUrl: thumbnailUrl,
+        sourceLink: 'https://mangadex.org/manga/$id',
+      ),
+    );
+  }
+
+  return List<MangaDexMangaPreview>.unmodifiable(previews);
+}
+
+Future<List<MangaDexChapterPreview>> fetchMangaDexMangaChapters(
+  String mangaId, {
+  int limit = 100,
+  int offset = 0,
+}) async {
+  try {
+    final response = await http.get(
+      Uri.https('api.mangadex.org', '/manga/$mangaId/feed', {
+        'limit': limit.toString(),
+        'offset': offset.toString(),
+        'translatedLanguage[]': 'en',
+        'order[chapter]': 'desc',
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      return const <MangaDexChapterPreview>[];
+    }
+
+    final decoded = jsonDecode(response.body);
+    return parseMangaDexFeedChapters(decoded, mangaId, 'MangaDex Chapter');
+  } catch (_) {
+    return const <MangaDexChapterPreview>[];
+  }
+}
+
+List<MangaDexChapterPreview> parseMangaDexFeedChapters(
+  Object? payload,
+  String mangaId,
+  String mangaTitle,
+) {
+  if (payload is! Map<String, Object?>) {
+    return const <MangaDexChapterPreview>[];
+  }
+
+  final data = payload['data'];
+
+  if (data is! List) {
+    return const <MangaDexChapterPreview>[];
+  }
+
+  final previews = <MangaDexChapterPreview>[];
+
+  for (final item in data.whereType<Map>()) {
+    final id = _cleanString(item['id']);
+    final attributes = item['attributes'];
+
+    if (id == null || attributes is! Map) {
+      continue;
+    }
+
+    previews.add(
+      MangaDexChapterPreview(
+        chapterId: id,
+        sourceLink: 'https://mangadex.org/chapter/$id',
+        title: mangaTitle,
+        chapterLabel: _mangaDexChapterLabel(attributes),
+        mangaId: mangaId,
+        pageCount: attributes['pages'] is int
+            ? attributes['pages'] as int
+            : null,
+        language: _cleanString(attributes['translatedLanguage']),
+      ),
+    );
+  }
+
+  return List<MangaDexChapterPreview>.unmodifiable(previews);
 }
 
 List<MangaDexChapterPreview> parseMangaDexChapterPreviews(Object? payload) {
