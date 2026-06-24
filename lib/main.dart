@@ -4345,14 +4345,19 @@ Future<StoryFetchResult> fetchNHentaiGallery(String link) async {
 
   for (final host in hosts) {
     try {
-      final response = await http.get(
-        Uri.https(host, '/api/gallery/$galleryId'),
-        headers: _readerRequestHeaders(host),
-      );
+      final response = await http
+          .get(
+            Uri.https(host, '/api/gallery/$galleryId'),
+            headers: _readerRequestHeaders(host),
+          )
+          .timeout(_privateSourceRequestTimeout);
 
       if (response.statusCode != 200) {
-        lastErrorMessage =
-            'NHentai replied with ${response.statusCode}. Try another mirror or VPN.';
+        lastErrorMessage = _nHentaiStatusMessage(
+          host,
+          response.statusCode,
+          api: true,
+        );
         continue;
       }
 
@@ -4363,22 +4368,26 @@ Future<StoryFetchResult> fetchNHentaiGallery(String link) async {
         return result;
       }
       lastErrorMessage = result.errorMessage;
-    } catch (_) {
-      lastErrorMessage =
-          'NHentai could not be reached. Try another mirror or VPN.';
+    } catch (error) {
+      lastErrorMessage = _nHentaiConnectionMessage(host, error);
     }
   }
 
   for (final host in hosts) {
     try {
-      final response = await http.get(
-        Uri.https(host, '/g/$galleryId/'),
-        headers: _readerRequestHeaders(host),
-      );
+      final response = await http
+          .get(
+            Uri.https(host, '/g/$galleryId/'),
+            headers: _readerRequestHeaders(host),
+          )
+          .timeout(_privateSourceRequestTimeout);
 
       if (response.statusCode != 200) {
-        lastErrorMessage =
-            'NHentai page replied with ${response.statusCode}. Try another mirror or VPN.';
+        lastErrorMessage = _nHentaiStatusMessage(
+          host,
+          response.statusCode,
+          api: false,
+        );
         continue;
       }
 
@@ -4388,9 +4397,8 @@ Future<StoryFetchResult> fetchNHentaiGallery(String link) async {
         return result;
       }
       lastErrorMessage = result.errorMessage;
-    } catch (_) {
-      lastErrorMessage =
-          'NHentai page could not be reached. Try another mirror or VPN.';
+    } catch (error) {
+      lastErrorMessage = _nHentaiConnectionMessage(host, error);
     }
   }
 
@@ -4611,6 +4619,7 @@ const List<String> _hitomiGalleryInfoHosts = <String>[
 ];
 
 const String _hitomiImageHost = 'a.gold-usergeneratedcontent.net';
+const Duration _privateSourceRequestTimeout = Duration(seconds: 18);
 const HitomiRouting _fallbackHitomiRouting = HitomiRouting(
   versionPath: '1782259201/',
 );
@@ -4708,11 +4717,47 @@ String _hitomiWebpImageUrl(String hash, HitomiRouting routing) {
 Map<String, String> _readerRequestHeaders(String host) {
   return {
     'Accept': 'application/json,text/html;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
     'Referer': 'https://$host/',
     'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
         '(KHTML, like Gecko) KevDex/2.2 Safari/537.36',
   };
+}
+
+String _nHentaiStatusMessage(String host, int statusCode, {required bool api}) {
+  final normalizedHost = host.toLowerCase();
+
+  if (normalizedHost == 'nhentai.to') {
+    return api
+        ? 'nhentai.to does not expose the metadata API KevDex needs.'
+        : 'nhentai.to replied with $statusCode before KevDex could read pages.';
+  }
+
+  return api
+      ? 'NHentai metadata replied with $statusCode. Try another mirror or VPN.'
+      : 'NHentai page replied with $statusCode. Try another mirror or VPN.';
+}
+
+String _nHentaiConnectionMessage(String host, Object error) {
+  final normalizedHost = host.toLowerCase();
+  final errorText = error.toString().toLowerCase();
+
+  if (normalizedHost == 'nhentai.to') {
+    return 'nhentai.to opens in Chrome, but blocks KevDex app requests. This source needs a future Browser Bridge.';
+  }
+
+  if (errorText.contains('timeout')) {
+    return 'NHentai timed out before pages could be read. Try another mirror or VPN.';
+  }
+
+  if (errorText.contains('handshake') ||
+      errorText.contains('connection') ||
+      errorText.contains('tls')) {
+    return 'NHentai closed the app connection before pages could be read. Try another mirror or VPN.';
+  }
+
+  return 'NHentai page could not be reached. Try another mirror or VPN.';
 }
 
 Map<String, String>? _readerImageRequestHeaders(String url) {
