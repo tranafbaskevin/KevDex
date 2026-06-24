@@ -75,7 +75,7 @@ const List<StorySourceDefinition> storySourceDefinitions = [
     label: 'NHentai',
     hintText: 'Paste NHentai gallery link',
     icon: Icons.lock_outline_rounded,
-    status: StorySourceStatus.planned,
+    status: StorySourceStatus.ready,
     privateSource: true,
   ),
   StorySourceDefinition(
@@ -83,7 +83,7 @@ const List<StorySourceDefinition> storySourceDefinitions = [
     label: 'Hitomi',
     hintText: 'Paste Hitomi gallery link',
     icon: Icons.lock_outline_rounded,
-    status: StorySourceStatus.planned,
+    status: StorySourceStatus.ready,
     privateSource: true,
   ),
 ];
@@ -98,6 +98,18 @@ StorySourceDefinition sourceDefinitionFor(StorySourceType sourceType) {
 List<StorySourceDefinition> get readyStorySources {
   return storySourceDefinitions
       .where((definition) => definition.isReady)
+      .toList(growable: false);
+}
+
+List<StorySourceDefinition> get publicReadyStorySources {
+  return readyStorySources
+      .where((definition) => !definition.privateSource)
+      .toList(growable: false);
+}
+
+List<StorySourceDefinition> get privateStorySources {
+  return storySourceDefinitions
+      .where((definition) => definition.privateSource)
       .toList(growable: false);
 }
 
@@ -251,8 +263,45 @@ class DriveImage {
       return null;
     }
 
-    return DriveImage(thumbnailUrl: thumbnailUrl, fullUrl: fullUrl);
+    return DriveImage(
+      thumbnailUrl: _normalizeReaderImageUrl(thumbnailUrl),
+      fullUrl: _normalizeReaderImageUrl(fullUrl),
+    );
   }
+}
+
+String _normalizeReaderImageUrl(String url) {
+  final uri = Uri.tryParse(url);
+
+  if (uri == null) {
+    return url;
+  }
+
+  if (uri.host.toLowerCase() == 'a.hitomi.la' ||
+      uri.host.toLowerCase() == _hitomiImageHost) {
+    final hash = RegExp(
+      r'([0-9a-f]{8,})',
+      caseSensitive: false,
+    ).firstMatch(uri.path)?.group(1);
+
+    if (hash != null) {
+      return _hitomiWebpImageUrl(hash, _fallbackHitomiRouting);
+    }
+  }
+
+  return url;
+}
+
+class StoryFetchResult {
+  final List<DriveImage> images;
+  final StoryMetadata metadata;
+  final String? errorMessage;
+
+  const StoryFetchResult({
+    required this.images,
+    required this.metadata,
+    this.errorMessage,
+  });
 }
 
 class ReadingProgress {
@@ -1258,11 +1307,29 @@ class _HomePageState extends State<HomePage> {
     final sourceType = detectStorySource(link);
     final folderId = extractDriveFolderId(link);
     final mangaDexChapterId = extractMangaDexChapterId(link);
+    final nHentaiGalleryId = extractNHentaiGalleryId(link);
+    final hitomiGalleryId = extractHitomiGalleryId(link);
 
     if (requestedSourceType == StorySourceType.mangaDexChapter &&
         mangaDexChapterId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Paste a MangaDex chapter link.')),
+      );
+      return;
+    }
+
+    if (requestedSourceType == StorySourceType.nHentaiGallery &&
+        nHentaiGalleryId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Paste a valid NHentai gallery link.')),
+      );
+      return;
+    }
+
+    if (requestedSourceType == StorySourceType.hitomiGallery &&
+        hitomiGalleryId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Paste a valid Hitomi gallery link.')),
       );
       return;
     }
@@ -1287,13 +1354,24 @@ class _HomePageState extends State<HomePage> {
     }
 
     StoryMetadata? metadata;
+    String? loadErrorMessage;
 
     List<DriveImage> images = [];
     await KevDexMemory.saveLastLink(link);
-    if (requestedSourceType == StorySourceType.mangaDexChapter) {
-      await KevDexMemory.saveLastMangaDexLink(link);
-    } else {
-      await KevDexMemory.saveLastDriveLink(link);
+    switch (requestedSourceType) {
+      case StorySourceType.mangaDexChapter:
+        await KevDexMemory.saveLastMangaDexLink(link);
+        break;
+      case StorySourceType.nHentaiGallery:
+        await KevDexMemory.saveLastNHentaiLink(link);
+        break;
+      case StorySourceType.hitomiGallery:
+        await KevDexMemory.saveLastHitomiLink(link);
+        break;
+      case StorySourceType.driveFolder:
+      case StorySourceType.singlePage:
+        await KevDexMemory.saveLastDriveLink(link);
+        break;
     }
 
     setState(() {
@@ -1305,6 +1383,16 @@ class _HomePageState extends State<HomePage> {
           mangaDexChapterId != null) {
         images = await fetchMangaDexChapterImages(mangaDexChapterId);
         metadata = await fetchMangaDexChapterMetadata(mangaDexChapterId);
+      } else if (requestedSourceType == StorySourceType.nHentaiGallery) {
+        final result = await fetchNHentaiGallery(link);
+        images = result.images;
+        metadata = result.metadata;
+        loadErrorMessage = result.errorMessage;
+      } else if (requestedSourceType == StorySourceType.hitomiGallery) {
+        final result = await fetchHitomiGallery(link);
+        images = result.images;
+        metadata = result.metadata;
+        loadErrorMessage = result.errorMessage;
       } else if (folderId != null) {
         images = await fetchDriveFolderImages(folderId);
         final folderName = await fetchDriveFolderName(folderId);
@@ -1318,6 +1406,9 @@ class _HomePageState extends State<HomePage> {
           title: 'Google Drive Image',
         );
       }
+    } catch (_) {
+      loadErrorMessage =
+          '${definition.label} could not be reached. Check the link, network, or VPN.';
     } finally {
       if (mounted) {
         setState(() {
@@ -1327,6 +1418,18 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (!mounted) {
+      return;
+    }
+
+    if (_sourceNeedsFetchedPages(requestedSourceType) && images.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            loadErrorMessage ??
+                '${definition.label} did not return readable pages.',
+          ),
+        ),
+      );
       return;
     }
 
@@ -1953,7 +2056,7 @@ class _SourceHubPanel extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final definition in readyStorySources)
+              for (final definition in publicReadyStorySources)
                 _SourceFilterChip(
                   definition: definition,
                   selected: selectedSourceType == definition.type,
@@ -1971,9 +2074,7 @@ class _SourceHubPanel extends StatelessWidget {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      for (final definition in plannedStorySources.where(
-                        (definition) => definition.privateSource,
-                      ))
+                      for (final definition in privateStorySources)
                         _SourceFilterChip(
                           definition: definition,
                           selected: selectedSourceType == definition.type,
@@ -1986,7 +2087,7 @@ class _SourceHubPanel extends StatelessWidget {
               ),
             ],
           ),
-          if (!selectedDefinition.isReady) ...[
+          if (selectedDefinition.privateSource) ...[
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -2005,7 +2106,7 @@ class _SourceHubPanel extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '${selectedDefinition.label} reader is staged for the next adapter build.',
+                      '${selectedDefinition.label} opens through Private Sources.',
                       style: const TextStyle(
                         color: _mutedText,
                         fontSize: 12,
@@ -2287,25 +2388,22 @@ class _SourceHubSheet extends StatelessWidget {
               const SizedBox(height: 14),
               const _SourceHubSectionTitle(label: 'Ready'),
               const SizedBox(height: 8),
-              for (final definition in readyStorySources) ...[
+              for (final definition in publicReadyStorySources) ...[
                 _SourceHubTile(
                   definition: definition,
                   selected: selectedSourceType == definition.type,
                   onTap: () => onSelectSource(definition.type),
                 ),
-                if (definition != readyStorySources.last)
+                if (definition != publicReadyStorySources.last)
                   const SizedBox(height: 10),
               ],
-              if (plannedStorySources.isNotEmpty)
+              if (privateStorySources.isNotEmpty)
                 ValueListenableBuilder<PrivateSourceSettings>(
                   valueListenable: privateSourceSettingsNotifier,
                   builder: (context, settings, child) {
-                    final visiblePlannedSources = plannedStorySources
-                        .where(
-                          (definition) =>
-                              !definition.privateSource || settings.isAccepted,
-                        )
-                        .toList(growable: false);
+                    final visiblePrivateSources = settings.isAccepted
+                        ? privateStorySources
+                        : const <StorySourceDefinition>[];
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2324,20 +2422,18 @@ class _SourceHubSheet extends StatelessWidget {
                             unawaited(_confirmClearPrivateHistory(context));
                           },
                         ),
-                        if (visiblePlannedSources.isNotEmpty) ...[
+                        if (visiblePrivateSources.isNotEmpty) ...[
                           const SizedBox(height: 18),
-                          const _SourceHubSectionTitle(label: 'Planned'),
+                          const _SourceHubSectionTitle(label: 'Private Ready'),
                           const SizedBox(height: 8),
-                          for (final definition in visiblePlannedSources) ...[
+                          for (final definition in visiblePrivateSources) ...[
                             _SourceHubTile(
                               definition: definition,
                               selected: selectedSourceType == definition.type,
-                              enabled:
-                                  definition.privateSource &&
-                                  settings.isAccepted,
+                              enabled: true,
                               onTap: () => onSelectSource(definition.type),
                             ),
-                            if (definition != visiblePlannedSources.last)
+                            if (definition != visiblePrivateSources.last)
                               const SizedBox(height: 10),
                           ],
                         ],
@@ -2702,6 +2798,9 @@ class _ContinueReadingCard extends StatelessWidget {
                           )
                         : CachedNetworkImage(
                             imageUrl: thumbnailUrl,
+                            httpHeaders: _readerImageRequestHeaders(
+                              thumbnailUrl,
+                            ),
                             fit: BoxFit.cover,
                             placeholder: (context, url) =>
                                 const _ThumbnailPlaceholder(),
@@ -2987,6 +3086,9 @@ class _LibraryItemCard extends StatelessWidget {
                           )
                         : CachedNetworkImage(
                             imageUrl: thumbnailUrl,
+                            httpHeaders: _readerImageRequestHeaders(
+                              thumbnailUrl,
+                            ),
                             fit: BoxFit.cover,
                             placeholder: (context, url) =>
                                 const _ThumbnailPlaceholder(),
@@ -3259,7 +3361,7 @@ class _ReaderPageState extends State<ReaderPage> {
 
     void preloadImage(String url) {
       precacheImage(
-        NetworkImage(url),
+        NetworkImage(url, headers: _readerImageRequestHeaders(url)),
         context,
         onError: (error, stackTrace) {},
       );
@@ -3318,6 +3420,9 @@ class _ReaderPageState extends State<ReaderPage> {
                             builder: (context, settings, child) {
                               return CachedNetworkImage(
                                 imageUrl: currentImage.fullUrl,
+                                httpHeaders: _readerImageRequestHeaders(
+                                  currentImage.fullUrl,
+                                ),
                                 fit: settings.fitMode.fit,
                                 placeholder: (context, url) =>
                                     const _MangaLoadingState(),
@@ -3879,6 +3984,9 @@ class _GalleryPageCard extends StatelessWidget {
                       ),
                       child: CachedNetworkImage(
                         imageUrl: image.thumbnailUrl,
+                        httpHeaders: _readerImageRequestHeaders(
+                          image.thumbnailUrl,
+                        ),
                         fit: BoxFit.cover,
                         placeholder: (context, url) =>
                             const _ThumbnailPlaceholder(),
@@ -4113,6 +4221,16 @@ bool _matchesRequestedPrivateSource(
   };
 }
 
+bool _sourceNeedsFetchedPages(StorySourceType sourceType) {
+  return switch (sourceType) {
+    StorySourceType.driveFolder ||
+    StorySourceType.mangaDexChapter ||
+    StorySourceType.nHentaiGallery ||
+    StorySourceType.hitomiGallery => true,
+    StorySourceType.singlePage => false,
+  };
+}
+
 String? extractDriveFolderId(String link) {
   final regExp = RegExp(r'/folders/([^/?]+)');
   final match = regExp.firstMatch(link);
@@ -4202,6 +4320,526 @@ String? extractHitomiGalleryId(String link) {
   ).firstMatch(lastPathSegment);
 
   return galleryIdMatch?.group(1);
+}
+
+Future<StoryFetchResult> fetchNHentaiGallery(String link) async {
+  final galleryId = extractNHentaiGalleryId(link);
+  final fallback = StoryFetchResult(
+    images: const <DriveImage>[],
+    metadata: StoryMetadata(
+      sourceType: StorySourceType.nHentaiGallery,
+      title: galleryId == null ? 'NHentai Gallery' : 'NHentai $galleryId',
+      chapterLabel: galleryId == null ? null : 'Gallery $galleryId',
+    ),
+    errorMessage: galleryId == null
+        ? 'Paste a valid NHentai gallery link.'
+        : 'NHentai did not return readable pages.',
+  );
+
+  if (galleryId == null) {
+    return fallback;
+  }
+
+  final hosts = _nHentaiCandidateHosts(link);
+  String? lastErrorMessage;
+
+  for (final host in hosts) {
+    try {
+      final response = await http.get(
+        Uri.https(host, '/api/gallery/$galleryId'),
+        headers: _readerRequestHeaders(host),
+      );
+
+      if (response.statusCode != 200) {
+        lastErrorMessage =
+            'NHentai replied with ${response.statusCode}. Try another mirror or VPN.';
+        continue;
+      }
+
+      final decoded = jsonDecode(response.body);
+      final result = parseNHentaiGalleryPayload(decoded, galleryId);
+
+      if (result.images.isNotEmpty) {
+        return result;
+      }
+      lastErrorMessage = result.errorMessage;
+    } catch (_) {
+      lastErrorMessage =
+          'NHentai could not be reached. Try another mirror or VPN.';
+    }
+  }
+
+  for (final host in hosts) {
+    try {
+      final response = await http.get(
+        Uri.https(host, '/g/$galleryId/'),
+        headers: _readerRequestHeaders(host),
+      );
+
+      if (response.statusCode != 200) {
+        lastErrorMessage =
+            'NHentai page replied with ${response.statusCode}. Try another mirror or VPN.';
+        continue;
+      }
+
+      final result = parseNHentaiGalleryPage(response.body, galleryId);
+
+      if (result.images.isNotEmpty) {
+        return result;
+      }
+      lastErrorMessage = result.errorMessage;
+    } catch (_) {
+      lastErrorMessage =
+          'NHentai page could not be reached. Try another mirror or VPN.';
+    }
+  }
+
+  return StoryFetchResult(
+    images: fallback.images,
+    metadata: fallback.metadata,
+    errorMessage: lastErrorMessage ?? fallback.errorMessage,
+  );
+}
+
+StoryFetchResult parseNHentaiGalleryPage(String html, String galleryId) {
+  if (_looksLikeCloudflareChallenge(html)) {
+    return StoryFetchResult(
+      images: const <DriveImage>[],
+      metadata: StoryMetadata(
+        sourceType: StorySourceType.nHentaiGallery,
+        title: 'NHentai $galleryId',
+        chapterLabel: 'Gallery $galleryId',
+      ),
+      errorMessage:
+          'NHentai is asking for browser verification. Try opening it in a browser first, or use another source.',
+    );
+  }
+
+  final gallery = _extractNHentaiGalleryMap(html);
+  return parseNHentaiGalleryPayload(gallery, galleryId);
+}
+
+StoryFetchResult parseNHentaiGalleryPayload(Object? payload, String galleryId) {
+  final fallback = StoryFetchResult(
+    images: const <DriveImage>[],
+    metadata: StoryMetadata(
+      sourceType: StorySourceType.nHentaiGallery,
+      title: 'NHentai $galleryId',
+      chapterLabel: 'Gallery $galleryId',
+    ),
+    errorMessage: 'NHentai metadata could not be read.',
+  );
+
+  if (payload is! Map) {
+    return fallback;
+  }
+
+  final mediaId = _cleanString(payload['media_id']);
+  final title = _nHentaiTitle(payload['title']) ?? fallback.metadata.title;
+  final images = payload['images'];
+  final pages = images is Map ? images['pages'] : null;
+
+  if (mediaId == null || pages is! List) {
+    return StoryFetchResult(
+      images: const <DriveImage>[],
+      metadata: StoryMetadata(
+        sourceType: StorySourceType.nHentaiGallery,
+        title: title,
+        chapterLabel: 'Gallery $galleryId',
+      ),
+      errorMessage: 'NHentai metadata did not include readable pages.',
+    );
+  }
+
+  final driveImages = <DriveImage>[];
+
+  for (var index = 0; index < pages.length; index++) {
+    final page = pages[index];
+    final pageType = page is Map ? _cleanString(page['t']) : null;
+    final extension = _nHentaiExtension(pageType);
+    final pageNumber = index + 1;
+    final pageUrl =
+        'https://i.nhentai.net/galleries/$mediaId/$pageNumber.$extension';
+
+    driveImages.add(DriveImage(thumbnailUrl: pageUrl, fullUrl: pageUrl));
+  }
+
+  return StoryFetchResult(
+    images: List<DriveImage>.unmodifiable(driveImages),
+    metadata: StoryMetadata(
+      sourceType: StorySourceType.nHentaiGallery,
+      title: title,
+      chapterLabel: 'Gallery $galleryId',
+    ),
+  );
+}
+
+Future<StoryFetchResult> fetchHitomiGallery(String link) async {
+  final galleryId = extractHitomiGalleryId(link);
+  final fallback = StoryFetchResult(
+    images: const <DriveImage>[],
+    metadata: StoryMetadata(
+      sourceType: StorySourceType.hitomiGallery,
+      title: galleryId == null ? 'Hitomi Gallery' : 'Hitomi $galleryId',
+      chapterLabel: galleryId == null ? null : 'Gallery $galleryId',
+    ),
+    errorMessage: galleryId == null
+        ? 'Paste a valid Hitomi gallery link.'
+        : 'Hitomi did not return readable pages.',
+  );
+
+  if (galleryId == null) {
+    return fallback;
+  }
+
+  String? lastErrorMessage;
+  final routing = await fetchHitomiRouting();
+
+  for (final host in _hitomiGalleryInfoHosts) {
+    try {
+      final response = await http.get(
+        Uri.https(host, '/galleries/$galleryId.js'),
+        headers: _readerRequestHeaders('hitomi.la'),
+      );
+
+      if (response.statusCode != 200) {
+        lastErrorMessage =
+            'Hitomi metadata replied with ${response.statusCode}. Try again later.';
+        continue;
+      }
+
+      final result = parseHitomiGalleryInfo(
+        response.body,
+        galleryId,
+        routing: routing,
+      );
+
+      if (result.images.isEmpty) {
+        lastErrorMessage = result.errorMessage;
+        continue;
+      }
+
+      return result;
+    } catch (_) {
+      lastErrorMessage =
+          'Hitomi page list could not be reached on this network.';
+    }
+  }
+
+  return StoryFetchResult(
+    images: fallback.images,
+    metadata: fallback.metadata,
+    errorMessage: lastErrorMessage ?? fallback.errorMessage,
+  );
+}
+
+StoryFetchResult parseHitomiGalleryInfo(
+  String script,
+  String galleryId, {
+  HitomiRouting routing = _fallbackHitomiRouting,
+}) {
+  final galleryInfo = _extractHitomiGalleryInfo(script);
+  final fallback = StoryFetchResult(
+    images: const <DriveImage>[],
+    metadata: StoryMetadata(
+      sourceType: StorySourceType.hitomiGallery,
+      title: 'Hitomi $galleryId',
+      chapterLabel: 'Gallery $galleryId',
+    ),
+    errorMessage: 'Hitomi metadata could not be read.',
+  );
+
+  if (galleryInfo == null) {
+    return fallback;
+  }
+
+  final title = _cleanString(galleryInfo['title']) ?? fallback.metadata.title;
+  final files = galleryInfo['files'];
+
+  if (files is! List) {
+    return StoryFetchResult(
+      images: const <DriveImage>[],
+      metadata: StoryMetadata(
+        sourceType: StorySourceType.hitomiGallery,
+        title: title,
+        chapterLabel: 'Gallery $galleryId',
+      ),
+      errorMessage: 'Hitomi metadata did not include readable pages.',
+    );
+  }
+
+  final images = <DriveImage>[];
+
+  for (final file in files.whereType<Map>()) {
+    final hash = _cleanString(file['hash']);
+
+    if (hash == null) {
+      continue;
+    }
+
+    final pageUrl = _hitomiWebpImageUrl(hash, routing);
+
+    images.add(DriveImage(thumbnailUrl: pageUrl, fullUrl: pageUrl));
+  }
+
+  return StoryFetchResult(
+    images: List<DriveImage>.unmodifiable(images),
+    metadata: StoryMetadata(
+      sourceType: StorySourceType.hitomiGallery,
+      title: title,
+      chapterLabel: 'Gallery $galleryId',
+    ),
+  );
+}
+
+List<String> _nHentaiCandidateHosts(String link) {
+  final hosts = <String>[];
+  final uri = Uri.tryParse(link.trim());
+  final host = uri?.host.toLowerCase() ?? '';
+
+  if (host.contains('nhentai')) {
+    hosts.add(host);
+  }
+
+  hosts.add('nhentai.net');
+  return hosts.toSet().toList(growable: false);
+}
+
+const List<String> _hitomiGalleryInfoHosts = <String>[
+  'ltn.hitomi.la',
+  'ltn.gold-usergeneratedcontent.net',
+];
+
+const String _hitomiImageHost = 'a.gold-usergeneratedcontent.net';
+const HitomiRouting _fallbackHitomiRouting = HitomiRouting(
+  versionPath: '1782259201/',
+);
+
+class HitomiRouting {
+  final String versionPath;
+  final Set<int> zeroSubdomainKeys;
+
+  const HitomiRouting({
+    this.versionPath = '',
+    this.zeroSubdomainKeys = const <int>{},
+  });
+
+  int mirrorForHash(String hash) {
+    return zeroSubdomainKeys.contains(hitomiRoutingKey(hash)) ? 0 : 1;
+  }
+
+  String webpSubdomainForHash(String hash) {
+    return 'w${1 + mirrorForHash(hash)}';
+  }
+
+  String fullPathForHash(String hash) {
+    final key = hitomiRoutingKey(hash);
+
+    if (versionPath.isEmpty) {
+      return _hitomiLegacyFullPathFromHash(hash);
+    }
+
+    return '$versionPath$key/$hash';
+  }
+}
+
+Future<HitomiRouting> fetchHitomiRouting() async {
+  for (final host in _hitomiGalleryInfoHosts) {
+    try {
+      final response = await http.get(
+        Uri.https(host, '/gg.js'),
+        headers: _readerRequestHeaders('hitomi.la'),
+      );
+
+      if (response.statusCode != 200) {
+        continue;
+      }
+
+      return parseHitomiRoutingScript(response.body);
+    } catch (_) {}
+  }
+
+  return _fallbackHitomiRouting;
+}
+
+HitomiRouting parseHitomiRoutingScript(String script) {
+  final versionPath =
+      RegExp(r"\bb\s*:\s*'([^']*)'").firstMatch(script)?.group(1) ?? '';
+  final zeroBlock = RegExp(
+    r'switch\s*\(g\)\s*\{(.*?)o\s*=\s*0\s*;',
+    dotAll: true,
+  ).firstMatch(script);
+  final zeroSubdomainKeys = <int>{};
+
+  if (zeroBlock != null) {
+    for (final match in RegExp(
+      r'case\s+(\d+)\s*:',
+    ).allMatches(zeroBlock.group(1)!)) {
+      final key = int.tryParse(match.group(1)!);
+
+      if (key != null) {
+        zeroSubdomainKeys.add(key);
+      }
+    }
+  }
+
+  return HitomiRouting(
+    versionPath: versionPath,
+    zeroSubdomainKeys: Set<int>.unmodifiable(zeroSubdomainKeys),
+  );
+}
+
+int hitomiRoutingKey(String hash) {
+  final match = RegExp(r'(..)(.)$').firstMatch(hash);
+
+  if (match == null) {
+    return 0;
+  }
+
+  return int.tryParse('${match.group(2)}${match.group(1)}', radix: 16) ?? 0;
+}
+
+String _hitomiWebpImageUrl(String hash, HitomiRouting routing) {
+  final subdomain = routing.webpSubdomainForHash(hash);
+  final path = routing.fullPathForHash(hash);
+  return 'https://$subdomain.gold-usergeneratedcontent.net/$path.webp';
+}
+
+Map<String, String> _readerRequestHeaders(String host) {
+  return {
+    'Accept': 'application/json,text/html;q=0.9,*/*;q=0.8',
+    'Referer': 'https://$host/',
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) KevDex/2.2 Safari/537.36',
+  };
+}
+
+Map<String, String>? _readerImageRequestHeaders(String url) {
+  final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
+
+  if (host.contains('hitomi') || host.contains('gold-usergeneratedcontent')) {
+    return {
+      'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      'Referer': 'https://hitomi.la/',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) KevDex/2.2 Safari/537.36',
+    };
+  }
+
+  if (host.contains('nhentai')) {
+    return _readerRequestHeaders('nhentai.net');
+  }
+
+  return null;
+}
+
+bool _looksLikeCloudflareChallenge(String html) {
+  return html.contains('cf_chl') ||
+      html.contains('challenge-platform') ||
+      html.contains('Enable JavaScript and cookies to continue') ||
+      html.contains('Just a moment');
+}
+
+Map<String, Object?>? _extractNHentaiGalleryMap(String html) {
+  final jsonParseMatch = RegExp(
+    r'window\._gallery\s*=\s*JSON\.parse\("((?:\\.|[^"\\])*)"\)',
+    dotAll: true,
+  ).firstMatch(html);
+
+  if (jsonParseMatch != null) {
+    try {
+      final rawJson = jsonDecode('"${jsonParseMatch.group(1)!}"');
+
+      if (rawJson is String) {
+        final decoded = jsonDecode(rawJson);
+
+        if (decoded is Map) {
+          return Map<String, Object?>.from(decoded);
+        }
+      }
+    } catch (_) {}
+  }
+
+  final directMatch = RegExp(
+    r'window\._gallery\s*=\s*(\{.*?\});',
+    dotAll: true,
+  ).firstMatch(html);
+
+  if (directMatch == null) {
+    return null;
+  }
+
+  try {
+    final decoded = jsonDecode(directMatch.group(1)!);
+
+    if (decoded is Map) {
+      return Map<String, Object?>.from(decoded);
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+String? _nHentaiTitle(Object? titleValue) {
+  if (titleValue is String) {
+    return _cleanString(titleValue);
+  }
+
+  if (titleValue is! Map) {
+    return null;
+  }
+
+  for (final key in const ['pretty', 'english', 'japanese']) {
+    final title = _cleanString(titleValue[key]);
+
+    if (title != null) {
+      return title;
+    }
+  }
+
+  return null;
+}
+
+String _nHentaiExtension(String? pageType) {
+  return switch (pageType) {
+    'p' => 'png',
+    'g' => 'gif',
+    'w' => 'webp',
+    _ => 'jpg',
+  };
+}
+
+Map<String, Object?>? _extractHitomiGalleryInfo(String script) {
+  final match = RegExp(
+    r'var\s+galleryinfo\s*=\s*(\{.*\});?\s*$',
+    dotAll: true,
+  ).firstMatch(script.trim());
+
+  if (match == null) {
+    return null;
+  }
+
+  try {
+    final decoded = jsonDecode(match.group(1)!);
+
+    if (decoded is Map) {
+      return Map<String, Object?>.from(decoded);
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+String _hitomiLegacyFullPathFromHash(String hash) {
+  if (hash.length < 3) {
+    return hash;
+  }
+
+  final last = hash.substring(hash.length - 1);
+  final previousTwo = hash.substring(hash.length - 3, hash.length - 1);
+  return '$last/$previousTwo/$hash';
 }
 
 Future<String?> fetchDriveFolderName(String folderId) async {

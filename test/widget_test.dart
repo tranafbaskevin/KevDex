@@ -42,6 +42,76 @@ void main() {
     );
   });
 
+  test('NHentai gallery payloads become reader pages', () {
+    final result = parseNHentaiGalleryPayload({
+      'media_id': '999999',
+      'title': {'pretty': 'Sample Private Gallery'},
+      'images': {
+        'pages': [
+          {'t': 'j'},
+          {'t': 'p'},
+        ],
+      },
+    }, '123456');
+
+    expect(result.metadata.sourceType, StorySourceType.nHentaiGallery);
+    expect(result.metadata.title, 'Sample Private Gallery');
+    expect(result.metadata.chapterLabel, 'Gallery 123456');
+    expect(result.images, hasLength(2));
+    expect(
+      result.images.first.fullUrl,
+      'https://i.nhentai.net/galleries/999999/1.jpg',
+    );
+    expect(
+      result.images.last.fullUrl,
+      'https://i.nhentai.net/galleries/999999/2.png',
+    );
+  });
+
+  test('Hitomi gallery info scripts become reader pages', () {
+    const script =
+        'var galleryinfo = {"id":"7654321","title":"Hitomi Sample",'
+        '"files":[{"name":"001.jpg","hash":"abcdef123456","haswebp":1},'
+        '{"name":"002.png","hash":"001122334455"}]};';
+    const routingScript =
+        "gg = { m:function(g){var o=1;switch(g){case 1605:o=0;break;}"
+        "return o;},s:function(h){return 'unused';},b:'1782259201/'};";
+    final routing = parseHitomiRoutingScript(routingScript);
+
+    final result = parseHitomiGalleryInfo(script, '7654321', routing: routing);
+
+    expect(result.metadata.sourceType, StorySourceType.hitomiGallery);
+    expect(result.metadata.title, 'Hitomi Sample');
+    expect(result.metadata.chapterLabel, 'Gallery 7654321');
+    expect(result.images, hasLength(2));
+    expect(hitomiRoutingKey('abcdef123456'), 1605);
+    expect(
+      result.images.first.fullUrl,
+      'https://w1.gold-usergeneratedcontent.net/1782259201/1605/abcdef123456.webp',
+    );
+    expect(
+      result.images.last.fullUrl,
+      'https://w2.gold-usergeneratedcontent.net/1782259201/1349/001122334455.webp',
+    );
+  });
+
+  test('Hitomi legacy image hosts migrate from saved cache', () {
+    final image = DriveImage.fromJson({
+      'thumbnailUrl': 'https://a.hitomi.la/webp/6/45/abcdef123456.webp',
+      'fullUrl': 'https://a.hitomi.la/images/5/45/001122334455.png',
+    });
+
+    expect(image, isNotNull);
+    expect(
+      image!.thumbnailUrl,
+      'https://w2.gold-usergeneratedcontent.net/1782259201/1605/abcdef123456.webp',
+    );
+    expect(
+      image.fullUrl,
+      'https://w2.gold-usergeneratedcontent.net/1782259201/1349/001122334455.webp',
+    );
+  });
+
   testWidgets('Home screen shows KevDex identity', (WidgetTester tester) async {
     readingProgressNotifier.value = null;
     libraryNotifier.value = const <LibraryItem>[];
@@ -112,7 +182,7 @@ void main() {
     await tester.tap(find.text('Enable'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Planned'), findsOneWidget);
+    expect(find.text('Private Ready'), findsOneWidget);
     expect(find.text('NHentai'), findsWidgets);
     expect(find.text('Hitomi'), findsWidgets);
     expect(find.byTooltip('Clear private history'), findsOneWidget);
@@ -120,7 +190,7 @@ void main() {
     resetKevDexTestState();
   });
 
-  testWidgets('Home can stage private source links without opening reader', (
+  testWidgets('Home can select private source inputs after confirmation', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -138,23 +208,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Open NHentai'), findsOneWidget);
-    expect(
-      find.text('NHentai reader is staged for the next adapter build.'),
-      findsOneWidget,
-    );
-
-    await tester.enterText(
-      find.byType(TextField),
-      'https://nhentai.xxx/g/123456/',
-    );
-    await tester.ensureVisible(find.byTooltip('Open NHentai'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.arrow_forward_rounded));
-    await tester.pump(const Duration(milliseconds: 250));
-
-    expect(KevDexMemory.lastNHentaiLink, 'https://nhentai.xxx/g/123456/');
-    expect(KevDexMemory.lastLink, 'https://nhentai.xxx/g/123456/');
-    expect(find.byType(ReaderPage), findsNothing);
+    expect(find.text('NHentai opens through Private Sources.'), findsOneWidget);
+    expect(find.text('Paste NHentai gallery link'), findsOneWidget);
 
     resetKevDexTestState();
   });
