@@ -12,15 +12,15 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 part 'models/story_models.dart';
+part 'services/kevdex_memory.dart';
 part 'utils/app_constants.dart';
 part 'utils/link_helpers.dart';
-part 'services/kevdex_memory.dart';
+part 'widgets/common_widgets.dart';
+part 'widgets/background_picker_widgets.dart';
 part 'widgets/reader_gallery_widgets.dart';
 part 'widgets/source_hub_widgets.dart';
 part 'widgets/manga_detail_widgets.dart';
 part 'widgets/reader_controls.dart';
-part 'widgets/common_widgets.dart';
-part 'widgets/background_picker_widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

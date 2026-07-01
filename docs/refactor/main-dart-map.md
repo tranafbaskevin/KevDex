@@ -17,9 +17,21 @@ Rules for this refactor phase:
 
 ---
 
+## Snapshot After v2.6.8
+
+Current local/GitHub baseline:
+
+- Latest synced commit: `v2.6.8 refactor remaining small widgets`.
+- `lib/main.dart`: about 6082 physical lines locally.
+- `devtools_options.yaml`: local untracked IDE file. Do not commit it.
+
+This snapshot closes the small-widget cleanup pass and prepares KevDex for v2.7.0 stability testing.
+
+---
+
 ## Current Refactor Status
 
-### v2.5.2 - Branding & Version Cleanup
+### v2.5.2 - Branding and Version Cleanup
 
 Completed:
 
@@ -121,7 +133,7 @@ Notes:
 
 ---
 
-### v2.6.3 - Refactor Small UI Widgets
+### v2.6.3 - Refactor Reader Gallery Widgets
 
 Created:
 
@@ -144,6 +156,139 @@ Notes:
 
 ---
 
+### v2.6.4 - Refactor Source Hub Widgets
+
+Created:
+
+```txt
+lib/widgets/source_hub_widgets.dart
+```
+
+Extracted:
+
+- Source Hub display widgets.
+- Source selection chips/buttons.
+- Source input/action panels.
+- Small source status/message UI pieces.
+
+Notes:
+
+- No UI design changes.
+- No logic changes.
+- Source switching behavior stayed in the same flow.
+
+---
+
+### v2.6.5 - Refactor Manga Detail Widgets
+
+Created:
+
+```txt
+lib/widgets/manga_detail_widgets.dart
+```
+
+Extracted:
+
+- Manga/story header display widgets.
+- Cover/title/source display pieces.
+- Description display widgets.
+- Chapter list display items.
+- Small external link/detail rows.
+
+Notes:
+
+- Did not split the full Manga Details screen.
+- Did not move API or chapter-fetch logic.
+- No UI or logic changes.
+
+---
+
+### v2.6.6 - Refactor Reader Controls
+
+Created:
+
+```txt
+lib/widgets/reader_controls.dart
+```
+
+Extracted:
+
+- Reader top/control display pieces.
+- Page counter display widgets.
+- Reader overlay arrow buttons.
+- Reader loading/error display widgets where safe.
+
+Notes:
+
+- Did not split the full ReaderPage.
+- Did not touch PageController logic.
+- Did not change image loading, cache, preload, or swipe behavior.
+
+---
+
+### v2.6.7 - Refactor Common UI / Empty and Error States
+
+Created:
+
+```txt
+lib/widgets/common_widgets.dart
+```
+
+Extracted:
+
+- Shared loading indicators.
+- Empty state widgets.
+- Error/message widgets.
+- Small section/header/panel helpers.
+- Reusable simple UI rows where safe.
+
+Notes:
+
+- No UI design changes.
+- No app logic changes.
+- No source changes.
+
+---
+
+### v2.6.8 - Refactor Remaining Small Widgets / Cleanup Leftovers
+
+Created:
+
+```txt
+lib/widgets/background_picker_widgets.dart
+```
+
+Extracted:
+
+- Background picker display widgets.
+- Small remaining safe UI pieces.
+- Minor widget leftovers that did not require moving screen state.
+
+Notes:
+
+- Did not split HomePage, ReaderPage, MangaDex Home, or Manga Details.
+- Did not move API/fetch/cache/preload logic.
+- No UI or logic changes.
+
+---
+
+### v2.6.9 - Cleanup Docs / Imports / Refactor Map Update
+
+Current goal:
+
+- Update this refactor map to match the real v2.6.8 structure.
+- Record the current local `main.dart` size.
+- Keep known deferred issues documented.
+- Keep `part` declarations in `main.dart` grouped clearly.
+
+Notes:
+
+- No feature changes.
+- No UI changes.
+- No logic changes.
+
+---
+
 ## Current Project Structure
 
 ```txt
@@ -161,10 +306,34 @@ lib/
     link_helpers.dart
 
   widgets/
+    background_picker_widgets.dart
+    common_widgets.dart
+    manga_detail_widgets.dart
+    reader_controls.dart
     reader_gallery_widgets.dart
+    source_hub_widgets.dart
+
+docs/
+  refactor/
+    main-dart-map.md
 ```
 
 This is the current safe foundation for future refactoring.
+
+---
+
+## Current `main.dart` Part Order
+
+The `part` declarations are grouped by responsibility:
+
+```txt
+models
+services
+utils
+widgets
+```
+
+This keeps the top of `main.dart` easier to scan without changing runtime behavior.
 
 ---
 
@@ -189,118 +358,78 @@ Recommended action:
 
 ---
 
-### Home / Source Hub UI
+### Home / Source Hub State
 
 Likely still inside:
 
 - Main home screen.
-- Source selector UI.
-- Google Drive input panel.
-- MangaDex input panel.
-- Source switching logic.
-- Background picker / UI customization entry points.
+- Source switching state.
+- Google Drive input state.
+- MangaDex input state.
+- Hentai2Read input state.
+- Background picker entry points.
+- Library/continue-reading orchestration.
 
 Recommended action:
 
 - Do not extract the full Home screen yet.
-- First extract small widgets only:
-  - source buttons
-  - source header
-  - input card
-  - background action button
-  - small reusable panels
-
-Possible future file:
-
-```txt
-lib/widgets/source_hub_widgets.dart
-```
+- Source Hub display widgets are already partly extracted.
+- Future extraction should be screen-level only after a stability checkpoint.
 
 ---
 
-### MangaDex Home / Search UI
+### MangaDex Home / Search UI and State
 
 Likely still inside:
 
 - MangaDex Home screen.
-- MangaDex search bar.
-- Manga list/grid.
-- Manga result cards.
-- Load-more/infinite scroll.
+- MangaDex search state.
+- Manga list/grid state.
+- Load-more/infinite scroll state.
 - Manga details navigation.
+- MangaDex API calls and parsing.
 
 Recommended action:
 
 - Do not extract the full MangaDex Home logic yet.
-- First extract display-only widgets:
-  - manga result card
-  - manga cover widget
-  - manga info row
-  - loading/empty/error state widgets
-
-Possible future files:
-
-```txt
-lib/widgets/mangadex_widgets.dart
-lib/screens/mangadex_home_screen.dart
-```
+- Do not move API calls until services are mapped separately.
 
 ---
 
-### Manga Details Screen
+### Manga Details Screen State
 
 Likely still inside:
 
-- Manga cover display.
-- Description section.
-- Chapter list.
-- Chapter item cards.
-- Read more/description expansion.
-- Open in MangaDex website link.
+- Manga detail screen state.
+- Description expansion state.
+- Chapter list orchestration.
+- Chapter open/navigation behavior.
 
 Recommended action:
 
-- Extract small widgets first:
-  - chapter list item
-  - manga description box
-  - manga header card
-
-Possible future file:
-
-```txt
-lib/widgets/manga_detail_widgets.dart
-```
+- Display widgets are partly extracted.
+- Keep data/state/navigation in `main.dart` until the service boundary is clearer.
 
 ---
 
-### Reader Screen
+### Reader Screen State
 
 Likely still inside:
 
-- Reader page.
+- Reader page state.
 - Page controller.
-- Swipe/arrow navigation.
-- Page counter.
+- Swipe/arrow navigation callbacks.
+- Page index updates.
 - Cache interaction.
 - Preload logic.
-- Reader settings overlay.
+- Image loading behavior.
+- Reader settings state.
 
 Recommended action:
 
 - Do not extract the full ReaderPage yet.
 - Reader is high-risk because it touches page state, cache, image loading, and navigation.
-- Extract only small visual widgets first:
-  - reader top bar
-  - page counter display
-  - arrow buttons
-  - loading/error display
-
-Possible future files:
-
-```txt
-lib/widgets/reader_controls.dart
-lib/screens/reader_screen.dart
-```
+- Reader controls/display widgets are already partly extracted.
 
 ---
 
@@ -308,11 +437,11 @@ lib/screens/reader_screen.dart
 
 Likely still inside:
 
-- Google Drive link input.
+- Google Drive link input usage.
 - Folder ID extraction usage.
 - Drive image fetching flow.
-- Drive folder/gallery display.
-- Drive image conversion.
+- Drive folder/gallery display flow.
+- Drive image URL conversion.
 
 Recommended action:
 
@@ -338,12 +467,42 @@ Likely still inside:
 
 Recommended action:
 
-- Do not move this until after UI widgets are smaller.
+- Do not move this until after UI widgets and service boundaries are mapped.
 - Later, move into:
 
 ```txt
 lib/services/mangadex_service.dart
 ```
+
+---
+
+### Hentai2Read Flow
+
+Likely still inside:
+
+- Hentai2Read Home fetch/search flow.
+- Hentai2Read detail parsing.
+- Hentai2Read chapter/page parsing.
+
+Recommended action:
+
+- Do not move this during v2.6.x cleanup unless a specific adapter refactor is planned.
+- Keep source behavior unchanged during cleanup.
+
+---
+
+### Legacy / Private Source Flow
+
+Likely still inside:
+
+- Hitomi/NHentai legacy adapter code.
+- Private source toggles and fallback behavior.
+
+Recommended action:
+
+- Treat as deferred/legacy code.
+- Do not optimize during v2.6.x cleanup.
+- Do not add new private source behavior during cleanup.
 
 ---
 
@@ -369,7 +528,7 @@ lib/services/cache_service.dart
 
 ---
 
-## Known Limitations
+## Known Deferred Issues
 
 ### MangaDex External / MangaPlus Chapters
 
@@ -383,7 +542,7 @@ Current decision:
 
 - Do not fix this during refactor cleanup.
 - Do not scrape/bypass external official readers.
-- Later, add a clearer message and optional “Open in browser” action.
+- Later, add a clearer message and optional "Open in browser" action.
 
 Possible future improvement:
 
@@ -423,104 +582,47 @@ Current decision:
 
 ---
 
-## Safe Future Refactor Candidates
+### Private Source Thumbnail Issue
 
-### v2.6.4 Candidate - More Small UI Widgets
+Observed:
 
-Possible extraction:
+- One private/adult source may not show thumbnails in Home/list cards.
+- The same item can still show images after opening detail/chapter.
 
-```txt
-lib/widgets/common_widgets.dart
-lib/widgets/source_hub_widgets.dart
-lib/widgets/manga_detail_widgets.dart
-```
+Current decision:
 
-Safe targets:
-
-- Loading indicator widgets.
-- Empty state widgets.
-- Error message widgets.
-- Small section headers.
-- Reusable glass/card panels.
-- Source selector buttons.
-- Manga/chapter display cards.
-
-Rules:
-
-- Do not move full screens yet.
-- Do not change UI design.
-- Do not change logic.
-- Test after extraction.
-
----
-
-### v2.6.5 Candidate - Manga Detail Widgets
-
-Possible extraction:
-
-```txt
-lib/widgets/manga_detail_widgets.dart
-```
-
-Safe targets:
-
-- Manga header card.
-- Description panel.
-- Chapter list item.
-- External website link row.
-
-Rules:
-
-- Keep data fetching in `main.dart` for now.
-- Only extract display widgets.
-
----
-
-### v2.6.6 Candidate - Reader Controls
-
-Possible extraction:
-
-```txt
-lib/widgets/reader_controls.dart
-```
-
-Safe targets:
-
-- Page counter widget.
-- Reader top bar.
-- Left/right overlay arrows.
-- Reader settings button.
-- Reader loading/error states.
-
-Rules:
-
-- Do not move page controller logic yet.
-- Do not move image loading logic yet.
-- Do not change swipe behavior.
+- Track as a technical note.
+- Do not prioritize during cleanup.
+- Do not fix in v2.6.9.
 
 ---
 
 ## High-Risk Areas
 
-Do not touch these until the project is cleaner.
+Do not touch these until the project is cleaner and a specific version is planned.
 
 ```txt
 ReaderPage full extraction
+HomePage full extraction
 MangaDex Home full extraction
+Manga Details full extraction
 Google Drive fetch logic
 MangaDex API service extraction
+Hentai2Read API/parser extraction
 Cache/preload logic
 Navigation/routing rewrite
 iOS/TestFlight setup
 Vietnamese source integration
 External MangaPlus handling
+Android 7 compatibility patch
+Private source thumbnail patch
 ```
 
 These areas can be refactored later, but only after smaller widgets and services are mapped.
 
 ---
 
-## Suggested Roadmap
+## Roadmap
 
 ### Done
 
@@ -529,23 +631,47 @@ v2.5.2 - Branding and Version Cleanup
 v2.6.0 - Refactor Story Models
 v2.6.1 - Refactor Constants and Link Helpers
 v2.6.2 - Refactor Storage and Reader Settings
-v2.6.3 - Refactor Small UI Widgets
+v2.6.3 - Refactor Reader Gallery Widgets
+v2.6.4 - Refactor Source Hub Widgets
+v2.6.5 - Refactor Manga Detail Widgets
+v2.6.6 - Refactor Reader Controls
+v2.6.7 - Refactor Common UI / Empty and Error States
+v2.6.8 - Refactor Remaining Small Widgets / Cleanup Leftovers
+```
+
+### Current
+
+```txt
+v2.6.9 - Cleanup Docs / Imports / Refactor Map Update
 ```
 
 ### Next
 
 ```txt
-v2.6.4 - Refactor More Small UI Widgets
-v2.6.5 - Refactor Manga Detail Widgets
-v2.6.6 - Refactor Reader Controls
+v2.7.0 - Stability Checkpoint
 ```
+
+Suggested v2.7.0 test scope:
+
+- Open app.
+- Google Drive source.
+- MangaDex paste link.
+- MangaDex Home search.
+- Manga detail and chapter list.
+- Reader page.
+- Page counter.
+- Cache / clear cache.
+- Library / continue reading.
+- Background picker.
+- Hentai2Read Home/detail/chapter.
+- Known limitation messaging.
 
 ### Later
 
 ```txt
-v2.7.0 - App Stability / QA / Known Limitations
-v2.8.x - Vietnamese Source Research
-v3.0 - Cross-platform Preparation
+v2.7.x - Reading history, favorites, cache polish
+v2.8.x - Vietnamese source research / experiment
+v3.0 - Cross-platform preparation and iOS/TestFlight planning
 ```
 
 ---
@@ -568,10 +694,10 @@ Recommended commit style:
 v2.6.x refactor <area name>
 ```
 
-Example:
+Current recommended commit:
 
 ```txt
-v2.6.4 refactor more small UI widgets
+v2.6.9 cleanup refactor docs and imports
 ```
 
 ---
@@ -580,13 +706,13 @@ v2.6.4 refactor more small UI widgets
 
 ```txt
 Kevin / Nobita
-→ Decides direction, tests APK, commits, releases.
+-> Decides direction, tests APK, commits, releases.
 
 Dora-chan
-→ Roadmap, review, QA checklist, risk analysis, prompts for Remi.
+-> Roadmap, review, QA checklist, risk analysis, prompts for Remi.
 
 Remi-chan
-→ Code/refactor implementation.
+-> Code/refactor implementation.
 ```
 
 This workflow should continue because it keeps KevDex stable while still moving forward.
